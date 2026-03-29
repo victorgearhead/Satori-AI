@@ -1,0 +1,79 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function userProfile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function recruiterForCompany(companyId) {
+      return signedIn()
+        && userProfile().role == 'recruiter'
+        && userProfile().companyId == companyId;
+    }
+
+    function candidateRole() {
+      return signedIn() && userProfile().role == 'candidate';
+    }
+
+    match /users/{uid} {
+      allow read, update: if isOwner(uid);
+      allow create: if isOwner(uid);
+      allow delete: if false;
+    }
+
+    match /jobs/{jobId} {
+      allow read: if signedIn();
+      allow create: if signedIn() && recruiterForCompany(request.resource.data.companyId);
+      allow update: if signedIn()
+        && recruiterForCompany(resource.data.companyId)
+        && request.resource.data.companyId == resource.data.companyId;
+      allow delete: if signedIn() && recruiterForCompany(resource.data.companyId);
+    }
+
+    match /applications/{applicationId} {
+      allow read: if signedIn() && (
+        resource.data.candidateId == request.auth.uid
+        || recruiterForCompany(resource.data.companyId)
+      );
+
+      allow create: if signedIn() && candidateRole();
+
+      allow update: if signedIn() && (
+        (resource.data.candidateId == request.auth.uid
+          && request.resource.data.candidateId == resource.data.candidateId
+          && request.resource.data.companyId == resource.data.companyId)
+        || (recruiterForCompany(resource.data.companyId)
+          && request.resource.data.companyId == resource.data.companyId)
+      );
+
+      allow delete: if false;
+    }
+
+    match /candidateAssessments/{assessmentId} {
+      allow read: if signedIn() && resource.data.candidateId == request.auth.uid;
+      allow create: if signedIn() && request.resource.data.candidateId == request.auth.uid;
+      allow update: if signedIn()
+        && resource.data.candidateId == request.auth.uid
+        && request.resource.data.candidateId == resource.data.candidateId;
+      allow delete: if false;
+    }
+
+    match /transparencyReports/{reportId} {
+      allow read: if signedIn() && (
+        resource.data.candidateId == request.auth.uid
+        || recruiterForCompany(resource.data.companyId)
+      );
+
+      allow create, update: if signedIn() && recruiterForCompany(request.resource.data.companyId);
+      allow delete: if false;
+    }
+  }
+}
