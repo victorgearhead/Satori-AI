@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Brain, LayoutDashboard, Briefcase, Settings, User, LogOut } from 'lucide-react'
+import { Brain, LayoutDashboard, Briefcase, Settings, User, LogOut, FileText } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/components/AuthProvider'
 import { Button } from '@/components/ui/button'
@@ -16,6 +16,7 @@ export function Navigation() {
     { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
     { name: 'Browse Jobs', href: '/jobs', icon: Briefcase },
     { name: 'Assessments', href: '/assessments', icon: Brain },
+    { name: 'Transparency', href: '/transparency-reports', icon: FileText },
   ]
 
   // Check if we are in the recruiter section to show different nav or styling

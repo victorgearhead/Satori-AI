@@ -264,15 +264,18 @@ export default function JobDetailPage() {
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="space-y-3">
-                    {[
-                      { stage: 'Application Review', info: '2-3 days' },
-                      { stage: 'Satori Logic Test', info: 'Required' },
-                      { stage: 'Technical Interview', info: 'Video Call' },
-                      { stage: 'Decision & Report', info: 'Final Step' }
-                    ].map((s, i) => (
+                    {(job.pipelineStages && job.pipelineStages.length > 0
+                      ? job.pipelineStages
+                      : [
+                          { name: 'Application Review', type: 'shortlist' },
+                          { name: 'Coding Test', type: 'coding' },
+                          { name: 'Technical Interview', type: 'interview' },
+                          { name: 'Final Decision', type: 'decision' },
+                        ]
+                    ).map((s, i) => (
                       <div key={i} className="flex justify-between items-center text-sm">
-                        <span className="text-slate-600 font-medium">{s.stage}</span>
-                        <Badge variant="outline" className="text-[10px] uppercase font-bold text-slate-400">{s.info}</Badge>
+                        <span className="text-slate-600 font-medium">{s.name}</span>
+                        <Badge variant="outline" className="text-[10px] uppercase font-bold text-slate-400">{String(s.type).replace('-', ' ')}</Badge>
                       </div>
                     ))}
                   </div>

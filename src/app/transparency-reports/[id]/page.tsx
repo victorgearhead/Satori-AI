@@ -49,7 +49,8 @@ export default function TransparencyReportPage() {
     !!report &&
     !!profile &&
     profile.role === 'recruiter' &&
-    profile.companyId !== report.companyId;
+    profile.companyId !== report.companyId &&
+    !report.publicVisibility;
 
   const metrics = [
     { label: 'Work Experience', key: 'experience' as const, icon: Briefcase, desc: 'Years and relevance of professional tenure.' },
@@ -59,6 +60,12 @@ export default function TransparencyReportPage() {
     { label: 'Tech Stack Match', key: 'skillMatch' as const, icon: Brain, desc: 'Direct alignment with the required tech stack.' },
   ];
 
+  const selectedEntry = report?.anonymizedCandidates?.find((entry) => entry.status === 'Selected');
+  const comparisonEntry = report?.anonymizedCandidates?.find((entry) => entry.status !== 'Selected');
+
+  const userMetrics = comparisonEntry?.userMetrics ?? report?.userMetrics;
+  const benchmarkMetrics = selectedEntry?.userMetrics ?? report?.hiredMetrics;
+
   return (
     <div className="min-h-screen bg-slate-50/50 font-body">
       <Navigation />
@@ -67,21 +74,17 @@ export default function TransparencyReportPage() {
           <div className="text-center text-slate-400 py-24">Loading transparency report...</div>
         )}
 
-        {!loading && !loadingReport && !profile && (
-          <div className="text-center text-slate-400 py-24">Sign in to view transparency reports.</div>
-        )}
-
-        {!loading && !loadingReport && profile && !report && (
+        {!loadingReport && !report && (
           <div className="text-center text-slate-400 py-24">Transparency report not found.</div>
         )}
 
-        {!loading && !loadingReport && profile && unauthorized && (
+        {!loadingReport && report && unauthorized && (
           <div className="text-center text-slate-400 py-24">
             Your recruiter account is not authorized to view this company report.
           </div>
         )}
 
-        {!loading && !loadingReport && profile && report && !unauthorized && (
+        {!loadingReport && report && !unauthorized && (
           <>
             <Link href="/dashboard" className="inline-flex items-center gap-2 text-sm text-slate-500 hover:text-primary mb-8 font-bold transition-colors">
               <ArrowLeft size={16} /> BACK TO DASHBOARD
@@ -110,11 +113,11 @@ export default function TransparencyReportPage() {
                     <div className="flex items-center gap-6">
                       <div className="flex items-center gap-2">
                         <div className="w-3 h-3 rounded-full bg-slate-200" />
-                        <span className="text-[10px] font-bold text-slate-400 uppercase">You</span>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase">Candidate</span>
                       </div>
                       <div className="flex items-center gap-2">
                         <div className="w-3 h-3 rounded-full bg-primary" />
-                        <span className="text-[10px] font-bold text-primary uppercase">Hired Candidate</span>
+                        <span className="text-[10px] font-bold text-primary uppercase">Selected Benchmark</span>
                       </div>
                     </div>
                   </div>
@@ -131,21 +134,21 @@ export default function TransparencyReportPage() {
                               <p className="text-[10px] text-slate-400 font-medium">{metric.desc}</p>
                             </div>
                             <div className="flex gap-6 items-baseline">
-                              <span className="text-xs font-bold text-slate-400">YOU: <span className="text-slate-900 ml-1">{report.userMetrics[metric.key]}%</span></span>
-                              <span className="text-sm font-black text-primary">HIRED: <span className="ml-1">{report.hiredMetrics[metric.key]}%</span></span>
+                              <span className="text-xs font-bold text-slate-400">CAND: <span className="text-slate-900 ml-1">{userMetrics?.[metric.key]}%</span></span>
+                              <span className="text-sm font-black text-primary">SELECTED: <span className="ml-1">{benchmarkMetrics?.[metric.key]}%</span></span>
                             </div>
                           </div>
                           <div className="space-y-2.5">
                             <div className="relative h-3 w-full bg-slate-100 rounded-full overflow-hidden">
                               <div
                                 className="absolute top-0 left-0 h-full bg-primary transition-all duration-700 ease-out"
-                                style={{ width: `${report.hiredMetrics[metric.key]}%` }}
+                                style={{ width: `${benchmarkMetrics?.[metric.key] ?? 0}%` }}
                               />
                             </div>
                             <div className="relative h-3 w-full bg-slate-100 rounded-full overflow-hidden">
                               <div
                                 className="absolute top-0 left-0 h-full bg-slate-300 transition-all duration-700 ease-out delay-100"
-                                style={{ width: `${report.userMetrics[metric.key]}%` }}
+                                style={{ width: `${userMetrics?.[metric.key] ?? 0}%` }}
                               />
                             </div>
                           </div>
@@ -181,6 +184,50 @@ export default function TransparencyReportPage() {
                   </div>
                   <div className="absolute top-0 right-0 w-96 h-96 bg-primary/10 rounded-full -mr-48 -mt-48 blur-[120px]" />
                 </section>
+
+                {(report.transcriptSummary || (report.transcriptHighlights?.length ?? 0) > 0) && (
+                  <section className="bg-white rounded-[2rem] border-2 border-slate-100 shadow-xl shadow-slate-200/50 p-8 space-y-6">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
+                        <Brain size={20} />
+                      </div>
+                      <h2 className="text-xl font-bold text-slate-900">Interview Transcript Intelligence</h2>
+                    </div>
+
+                    {report.transcriptSummary && (
+                      <p className="text-slate-600 leading-relaxed">{report.transcriptSummary}</p>
+                    )}
+
+                    {(report.transcriptHighlights?.length ?? 0) > 0 && (
+                      <div className="space-y-3">
+                        <h3 className="text-sm font-bold text-slate-900 uppercase tracking-widest">Notable Highlights</h3>
+                        <ul className="space-y-2 list-disc pl-5 text-slate-600 text-sm">
+                          {report.transcriptHighlights?.map((item, index) => (
+                            <li key={index}>{item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </section>
+                )}
+
+                {(report.anonymizedCandidates?.length ?? 0) > 0 && (
+                  <section className="bg-white rounded-[2rem] border-2 border-slate-100 shadow-xl shadow-slate-200/50 p-8 space-y-5">
+                    <h2 className="text-xl font-bold text-slate-900">PII-Redacted Candidate Corpus</h2>
+                    <div className="space-y-4">
+                      {report.anonymizedCandidates?.map((entry) => (
+                        <div key={entry.candidateId} className="border rounded-xl p-4 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <p className="text-xs font-bold tracking-widest text-slate-500">{entry.candidateAlias}</p>
+                            <p className="text-xs font-bold text-primary">{entry.status}</p>
+                          </div>
+                          <p className="text-sm text-slate-600">{entry.resumeSummary}</p>
+                          <p className="text-sm text-slate-600">{entry.transcriptSummary}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                )}
               </div>
 
               <aside className="space-y-8">

@@ -11,8 +11,12 @@ import {
 import { db } from '@/lib/firebase';
 import type {
   Application,
+  CandidateResumeProfile,
   CandidateAssessment,
+  InterviewSession,
+  InterviewTranscript,
   Job,
+  PipelineStage,
   TransparencyReport,
 } from '@/lib/types';
 
@@ -34,6 +38,9 @@ function toJob(id: string, data: Record<string, unknown>): Job {
       : [],
     postedAt: String(data.postedAt ?? ''),
     tags: Array.isArray(data.tags) ? (data.tags as string[]) : [],
+    pipelineStages: Array.isArray(data.pipelineStages)
+      ? (data.pipelineStages as PipelineStage[])
+      : [],
   });
 }
 
@@ -55,7 +62,27 @@ function toApplication(id: string, data: Record<string, unknown>): Application {
     company: String(data.company ?? ''),
     companyId: String(data.companyId ?? ''),
     jobTitle: String(data.jobTitle ?? ''),
+    pipelineStageIndex:
+      typeof data.pipelineStageIndex === 'number' ? data.pipelineStageIndex : 0,
+    stageHistory: Array.isArray(data.stageHistory)
+      ? (data.stageHistory as Application['stageHistory'])
+      : [],
+    autoApplied: Boolean(data.autoApplied),
   });
+}
+
+function toCandidateResumeProfile(
+  candidateId: string,
+  data: Record<string, unknown>
+): CandidateResumeProfile {
+  return {
+    candidateId,
+    sourceCvUrl: data.sourceCvUrl ? String(data.sourceCvUrl) : undefined,
+    extractedText: String(data.extractedText ?? ''),
+    summary: String(data.summary ?? ''),
+    skills: Array.isArray(data.skills) ? (data.skills as string[]) : [],
+    updatedAt: String(data.updatedAt ?? ''),
+  };
 }
 
 function toAssessment(id: string, data: Record<string, unknown>): CandidateAssessment {
@@ -77,6 +104,7 @@ function toTransparencyReport(
   data: Record<string, unknown>
 ): TransparencyReport {
   return withId(id, {
+    jobId: data.jobId ? String(data.jobId) : undefined,
     applicationId: String(data.applicationId ?? ''),
     companyId: String(data.companyId ?? ''),
     candidateId: String(data.candidateId ?? ''),
@@ -86,6 +114,66 @@ function toTransparencyReport(
     hiredMetrics: data.hiredMetrics as TransparencyReport['hiredMetrics'],
     qualitativeAnalysis: String(data.qualitativeAnalysis ?? ''),
     decidingFactor: String(data.decidingFactor ?? ''),
+    publicVisibility: Boolean(data.publicVisibility),
+    interviewSessionId: data.interviewSessionId
+      ? String(data.interviewSessionId)
+      : undefined,
+    transcriptSummary: data.transcriptSummary
+      ? String(data.transcriptSummary)
+      : undefined,
+    transcriptHighlights: Array.isArray(data.transcriptHighlights)
+      ? (data.transcriptHighlights as string[])
+      : [],
+    anonymizedCandidates: Array.isArray(data.anonymizedCandidates)
+      ? (data.anonymizedCandidates as TransparencyReport['anonymizedCandidates'])
+      : [],
+    piiRedactionEnabled: Boolean(data.piiRedactionEnabled),
+  });
+}
+
+function toInterviewSession(id: string, data: Record<string, unknown>): InterviewSession {
+  return withId(id, {
+    companyId: String(data.companyId ?? ''),
+    recruiterId: String(data.recruiterId ?? ''),
+    jobId: String(data.jobId ?? ''),
+    jobTitle: String(data.jobTitle ?? ''),
+    title: String(data.title ?? ''),
+    description: data.description ? String(data.description) : undefined,
+    startTimeIso: String(data.startTimeIso ?? ''),
+    endTimeIso: String(data.endTimeIso ?? ''),
+    timezone: String(data.timezone ?? 'UTC'),
+    meetLink: String(data.meetLink ?? ''),
+    calendarEventId: data.calendarEventId ? String(data.calendarEventId) : undefined,
+    candidateIds: Array.isArray(data.candidateIds) ? (data.candidateIds as string[]) : [],
+    candidateEmails: Array.isArray(data.candidateEmails)
+      ? (data.candidateEmails as string[])
+      : [],
+    status: (data.status as InterviewSession['status']) ?? 'Scheduled',
+    transcriptStatus:
+      (data.transcriptStatus as InterviewSession['transcriptStatus']) ?? 'Pending',
+  });
+}
+
+function toInterviewTranscript(
+  id: string,
+  data: Record<string, unknown>
+): InterviewTranscript {
+  return withId(id, {
+    sessionId: String(data.sessionId ?? ''),
+    companyId: String(data.companyId ?? ''),
+    candidateId: String(data.candidateId ?? ''),
+    transcriptText: String(data.transcriptText ?? ''),
+    source: (data.source as InterviewTranscript['source']) ?? 'manual',
+    extractedSummary: String(data.extractedSummary ?? ''),
+    extractedStrengths: Array.isArray(data.extractedStrengths)
+      ? (data.extractedStrengths as string[])
+      : [],
+    extractedRisks: Array.isArray(data.extractedRisks)
+      ? (data.extractedRisks as string[])
+      : [],
+    communicationScore: Number(data.communicationScore ?? 0),
+    problemSolvingScore: Number(data.problemSolvingScore ?? 0),
+    confidenceScore: Number(data.confidenceScore ?? 0),
   });
 }
 
@@ -136,6 +224,32 @@ export async function getCandidateApplications(
   return snapshot.docs.map((appDoc) => toApplication(appDoc.id, appDoc.data()));
 }
 
+export async function getApplicationsByJob(
+  jobId: string,
+  companyId: string
+): Promise<Application[]> {
+  const appsQuery = query(
+    collection(db, 'applications'),
+    where('jobId', '==', jobId),
+    where('companyId', '==', companyId),
+    orderBy('appliedDate', 'desc')
+  );
+
+  const snapshot = await getDocs(appsQuery);
+  return snapshot.docs.map((appDoc) => toApplication(appDoc.id, appDoc.data()));
+}
+
+export async function getCandidateResumeProfile(
+  candidateId: string
+): Promise<CandidateResumeProfile | null> {
+  const snapshot = await getDoc(doc(db, 'candidateProfiles', candidateId));
+  if (!snapshot.exists()) {
+    return null;
+  }
+
+  return toCandidateResumeProfile(snapshot.id, snapshot.data());
+}
+
 export async function getCandidateAssessments(
   candidateId: string
 ): Promise<CandidateAssessment[]> {
@@ -171,4 +285,64 @@ export async function getTransparencyReport(
   }
 
   return toTransparencyReport(snapshot.id, snapshot.data());
+}
+
+export async function getPublicTransparencyReports(): Promise<TransparencyReport[]> {
+  const reportsQuery = query(
+    collection(db, 'transparencyReports'),
+    where('publicVisibility', '==', true)
+  );
+
+  const snapshot = await getDocs(reportsQuery);
+  return snapshot.docs.map((reportDoc) =>
+    toTransparencyReport(reportDoc.id, reportDoc.data())
+  );
+}
+
+export async function getRecruiterInterviewSessions(
+  companyId: string
+): Promise<InterviewSession[]> {
+  const sessionsQuery = query(
+    collection(db, 'interviewSessions'),
+    where('companyId', '==', companyId),
+    orderBy('startTimeIso', 'desc')
+  );
+
+  const snapshot = await getDocs(sessionsQuery);
+  return snapshot.docs.map((sessionDoc) =>
+    toInterviewSession(sessionDoc.id, sessionDoc.data())
+  );
+}
+
+export async function getCandidateInterviewSessions(
+  candidateId: string
+): Promise<InterviewSession[]> {
+  const sessionsQuery = query(
+    collection(db, 'interviewSessions'),
+    where('candidateIds', 'array-contains', candidateId),
+    orderBy('startTimeIso', 'desc')
+  );
+
+  const snapshot = await getDocs(sessionsQuery);
+  return snapshot.docs.map((sessionDoc) =>
+    toInterviewSession(sessionDoc.id, sessionDoc.data())
+  );
+}
+
+export async function getInterviewTranscriptBySession(
+  sessionId: string,
+  candidateId?: string
+): Promise<InterviewTranscript | null> {
+  const constraints: QueryConstraint[] = [where('sessionId', '==', sessionId)];
+  if (candidateId) {
+    constraints.push(where('candidateId', '==', candidateId));
+  }
+
+  const transcriptsQuery = query(collection(db, 'interviewTranscripts'), ...constraints);
+  const snapshot = await getDocs(transcriptsQuery);
+  if (snapshot.empty) {
+    return null;
+  }
+
+  return toInterviewTranscript(snapshot.docs[0].id, snapshot.docs[0].data());
 }

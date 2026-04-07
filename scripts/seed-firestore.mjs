@@ -95,6 +95,84 @@ const users = [
   },
 ];
 
+const transparencyReports = [
+  {
+    id: 'job-job-satori-backend',
+    jobId: 'job-satori-backend',
+    applicationId: 'job-job-satori-backend',
+    companyId: 'swiggy',
+    candidateId: 'demo-candidate',
+    jobTitle: 'SDE-2 (Backend)',
+    company: 'Swiggy',
+    userMetrics: {
+      experience: 72,
+      projectDepth: 78,
+      internshipRelevance: 70,
+      academicPedigree: 74,
+      skillMatch: 82,
+    },
+    hiredMetrics: {
+      experience: 84,
+      projectDepth: 88,
+      internshipRelevance: 82,
+      academicPedigree: 86,
+      skillMatch: 87,
+    },
+    qualitativeAnalysis:
+      'Candidate demonstrated strong API design intuition and debugging speed. The final selection favored deeper distributed-systems incident ownership under production pressure.',
+    decidingFactor: 'Higher production incident ownership in distributed backend systems.',
+    publicVisibility: true,
+    transcriptSummary:
+      'Interview transcript showed clear communication and structured reasoning. Improvement area was deeper consistency in trade-off analysis under scale constraints.',
+    transcriptHighlights: [
+      'Strong explanation of idempotency strategy for payment retries.',
+      'Needed prompting to quantify p95/p99 latency impact of design choices.',
+      'Demonstrated practical debugging workflow during outage scenario.',
+    ],
+    anonymizedCandidates: [
+      {
+        candidateId: 'demo-candidate',
+        candidateAlias: 'CAND-8FA19A21',
+        status: 'Selected',
+        resumeSummary: 'Backend candidate with distributed systems and microservices experience.',
+        transcriptSummary:
+          'Structured communication and strong debugging depth with moderate scaling trade-off clarity.',
+        transcriptHighlights: [
+          'Clear retry/idempotency approach.',
+          'Good incident triage process articulation.',
+        ],
+        userMetrics: {
+          experience: 84,
+          projectDepth: 88,
+          internshipRelevance: 82,
+          academicPedigree: 86,
+          skillMatch: 87,
+        },
+      },
+      {
+        candidateId: 'demo-candidate-2',
+        candidateAlias: 'CAND-C71DBA42',
+        status: 'NotSelected',
+        resumeSummary: 'Strong coding fundamentals with limited large-scale backend ownership.',
+        transcriptSummary:
+          'Good fundamentals but lower confidence on production trade-off decisions in high-scale contexts.',
+        transcriptHighlights: [
+          'Solid API contract basics.',
+          'Needed support on latency-budget reasoning.',
+        ],
+        userMetrics: {
+          experience: 72,
+          projectDepth: 78,
+          internshipRelevance: 70,
+          academicPedigree: 74,
+          skillMatch: 82,
+        },
+      },
+    ],
+    piiRedactionEnabled: true,
+  },
+];
+
 async function seed() {
   const batch = db.batch();
 
@@ -111,6 +189,15 @@ async function seed() {
     const ref = db.collection('jobs').doc(job.id);
     batch.set(ref, {
       ...job,
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+  }
+
+  for (const report of transparencyReports) {
+    const ref = db.collection('transparencyReports').doc(report.id);
+    batch.set(ref, {
+      ...report,
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
     });

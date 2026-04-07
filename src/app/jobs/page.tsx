@@ -6,16 +6,35 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { storage } from '@/lib/firebase';
+import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { getJobs } from '@/lib/database';
 import type { Job } from '@/lib/types';
 import { Search, MapPin, DollarSign, Briefcase, Filter, ChevronRight, Brain, Clock } from 'lucide-react';
 import Link from 'next/link';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/components/AuthProvider';
+import { analyzeResumeAndAutoApply } from '@/app/actions';
+
+interface MatchRecommendation {
+  jobId: string;
+  title: string;
+  company: string;
+  score: number;
+  missingSkills: string[];
+  matchedSkills: string[];
+  autoApplied: boolean;
+}
 
 export default function JobBoard() {
   const { toast } = useToast();
+  const { profile, idToken } = useAuth();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
+  const [resumeFile, setResumeFile] = useState<File | null>(null);
+  const [autoApplying, setAutoApplying] = useState(false);
+  const [recommendations, setRecommendations] = useState<MatchRecommendation[]>([]);
+  const [thresholdUsed, setThresholdUsed] = useState<number>(88);
 
   useEffect(() => {
     async function loadJobs() {
@@ -42,6 +61,106 @@ export default function JobBoard() {
     <div className="min-h-screen bg-slate-50/50">
       <Navigation />
       <main className="container mx-auto px-4 py-12 max-w-6xl">
+        <Card className="p-6 mb-8 border-slate-200 bg-white">
+          <div className="flex flex-col gap-4">
+            <h2 className="text-lg font-bold text-slate-900">AI Resume Match + Auto Apply</h2>
+            <p className="text-sm text-slate-500">
+              Upload your PDF resume once. Jobs with match score above threshold are auto-applied, and others show missing skills.
+            </p>
+            <div className="flex flex-col md:flex-row gap-3 items-start md:items-center">
+              <input
+                type="file"
+                accept="application/pdf"
+                onChange={(event) => setResumeFile(event.target.files?.[0] ?? null)}
+                className="text-sm"
+              />
+              <Button
+                disabled={autoApplying || !resumeFile}
+                onClick={async () => {
+                  if (!idToken || !profile || profile.role !== 'candidate') {
+                    toast({
+                      title: 'Candidate sign-in required',
+                      description: 'Please sign in as candidate to use auto-apply.',
+                      variant: 'destructive',
+                    });
+                    return;
+                  }
+
+                  if (!resumeFile) {
+                    return;
+                  }
+
+                  try {
+                    setAutoApplying(true);
+                    const fileRef = ref(
+                      storage,
+                      `candidate-cv/${profile.uid}/${Date.now()}-${resumeFile.name}`
+                    );
+                    const uploadResult = await uploadBytes(fileRef, resumeFile);
+                    const cvUrl = await getDownloadURL(uploadResult.ref);
+
+                    const result = await analyzeResumeAndAutoApply({
+                      idToken,
+                      cvUrl,
+                    });
+
+                    setRecommendations(result.recommendations as MatchRecommendation[]);
+                    setThresholdUsed(result.threshold);
+
+                    toast({
+                      title: 'Resume analysis complete',
+                      description: `${result.autoAppliedCount} jobs auto-applied at ${result.threshold}% threshold.`,
+                    });
+                  } catch (error) {
+                    console.error(error);
+                    toast({
+                      title: 'Auto-apply failed',
+                      description:
+                        error instanceof Error
+                          ? error.message
+                          : 'Could not analyze resume for job matching.',
+                      variant: 'destructive',
+                    });
+                  } finally {
+                    setAutoApplying(false);
+                  }
+                }}
+              >
+                {autoApplying ? 'Analyzing Resume...' : 'Analyze Resume + Auto Apply'}
+              </Button>
+            </div>
+
+            {recommendations.length > 0 && (
+              <div className="space-y-3 pt-2">
+                <p className="text-xs font-bold uppercase tracking-widest text-slate-400">
+                  Match Insights (threshold: {thresholdUsed}%)
+                </p>
+                <div className="space-y-2">
+                  {recommendations.slice(0, 6).map((rec) => (
+                    <div key={rec.jobId} className="border rounded-lg p-3 flex flex-col gap-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-bold text-slate-900">
+                          {rec.title} - {rec.company}
+                        </p>
+                        <Badge className={rec.score >= thresholdUsed ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}>
+                          {rec.score}%
+                        </Badge>
+                      </div>
+                      {rec.autoApplied ? (
+                        <p className="text-xs text-emerald-600 font-semibold">Auto-applied</p>
+                      ) : (
+                        <p className="text-xs text-slate-500">
+                          Missing skills: {rec.missingSkills.length > 0 ? rec.missingSkills.join(', ') : 'None'}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </Card>
+
         <header className="mb-12 text-center space-y-4">
           <h1 className="text-4xl font-extrabold text-slate-900 tracking-tight">Find Your Next Role</h1>
           <p className="text-slate-500 text-lg max-w-2xl mx-auto">

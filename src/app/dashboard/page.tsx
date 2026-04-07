@@ -6,11 +6,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Shield, Clock, FileText, Search, Award, Code2, TrendingUp } from 'lucide-react';
+import { Shield, Clock, FileText, Search, Award, Code2, TrendingUp, Video } from 'lucide-react';
 import Link from 'next/link';
 import { useAuth } from '@/components/AuthProvider';
-import { getCandidateApplications, getCandidateAssessments } from '@/lib/database';
-import type { Application, CandidateAssessment } from '@/lib/types';
+import { getCandidateApplications, getCandidateAssessments, getCandidateInterviewSessions } from '@/lib/database';
+import type { Application, CandidateAssessment, InterviewSession } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 
 export default function CandidateDashboard() {
@@ -18,6 +18,7 @@ export default function CandidateDashboard() {
   const { toast } = useToast();
   const [applications, setApplications] = useState<Application[]>([]);
   const [assessments, setAssessments] = useState<CandidateAssessment[]>([]);
+  const [interviews, setInterviews] = useState<InterviewSession[]>([]);
   const [loadingData, setLoadingData] = useState(true);
 
   useEffect(() => {
@@ -25,18 +26,21 @@ export default function CandidateDashboard() {
       if (!profile || profile.role !== 'candidate') {
         setApplications([]);
         setAssessments([]);
+        setInterviews([]);
         setLoadingData(false);
         return;
       }
 
       try {
         setLoadingData(true);
-        const [apps, skillAssessments] = await Promise.all([
+        const [apps, skillAssessments, upcomingInterviews] = await Promise.all([
           getCandidateApplications(profile.uid),
           getCandidateAssessments(profile.uid),
+          getCandidateInterviewSessions(profile.uid),
         ]);
         setApplications(apps);
         setAssessments(skillAssessments);
+        setInterviews(upcomingInterviews);
       } catch (error) {
         console.error(error);
         toast({
@@ -238,6 +242,33 @@ export default function CandidateDashboard() {
                     <p className="text-xs text-slate-600 leading-relaxed italic">
                       Build consistency across interviews by repeatedly attempting role-specific assessments and tracking skill deltas over time.
                     </p>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-slate-200">
+                  <CardHeader className="p-6 pb-3">
+                    <CardTitle className="text-sm font-bold flex items-center gap-2 text-slate-900">
+                      <Video className="text-primary" size={16} /> Upcoming Interviews
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-6 pt-0 space-y-3">
+                    {interviews.length === 0 && (
+                      <p className="text-xs text-slate-400">No interviews scheduled yet.</p>
+                    )}
+                    {interviews.slice(0, 3).map((session) => (
+                      <div key={session.id} className="border rounded-lg p-3">
+                        <p className="text-xs font-bold text-slate-900">{session.title}</p>
+                        <p className="text-[11px] text-slate-500">{new Date(session.startTimeIso).toLocaleString()}</p>
+                        <a
+                          href={session.meetLink}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-[11px] text-primary font-semibold"
+                        >
+                          Join Google Meet
+                        </a>
+                      </div>
+                    ))}
                   </CardContent>
                 </Card>
               </aside>

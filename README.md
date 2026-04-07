@@ -8,6 +8,11 @@ Production-ready Next.js + Firebase platform for candidate assessments, recruite
 - Firestore-backed jobs, applications, candidate assessments, and transparency reports.
 - Firebase Storage upload path for candidate CV files.
 - Genkit AI flow orchestration through secure Next.js server actions.
+- Recruiter interview operations with Google Meet scheduling.
+- Gemini-powered transcript intelligence synced into transparency reports.
+- PDF resume extraction with skill-based auto-apply matching.
+- Recruiter-customizable per-job hiring pipelines (shortlist/coding/interview/decision).
+- Candidate stage visibility with transparent progression statuses.
 - Company-first tenant isolation in Firestore security rules.
 - Firebase App Hosting deployment config for GCP.
 
@@ -16,6 +21,8 @@ Production-ready Next.js + Firebase platform for candidate assessments, recruite
 - Frontend: Next.js App Router.
 - Auth + Data: Firebase Auth, Firestore, Storage.
 - AI Evaluation: Genkit (`generateAssessmentTask`, `evaluateSolutionAndProvideFeedback`, `detectSubmissionAuthenticity`).
+- Interview Intelligence: Google Calendar + Meet + Genkit transcript analysis.
+- Auto Matching: Resume text extraction + threshold-based job matching.
 - Runtime Hosting: Firebase App Hosting.
 
 ## Prerequisites
@@ -33,6 +40,15 @@ Production-ready Next.js + Firebase platform for candidate assessments, recruite
 4. For local scripts/server actions outside GCP ADC, set:
    - `FIREBASE_CLIENT_EMAIL`
    - `FIREBASE_PRIVATE_KEY`
+5. For Google Meet scheduling, set:
+   - `GOOGLE_SERVICE_ACCOUNT_EMAIL`
+   - `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY`
+   - `GOOGLE_CALENDAR_ID` (optional)
+   - `INTERVIEW_BOT_WEBHOOK_KEY` (for external transcript bots)
+6. Optional matching threshold override:
+   - `AUTO_APPLY_MATCH_THRESHOLD` (default `88`)
+7. Stage notification email queue collection:
+   - `FIREBASE_EMAIL_COLLECTION` (optional, default `mail`)
 
 ## 2. Select Firebase Project
 
@@ -61,6 +77,23 @@ This deploys:
 - `firestore.indexes.json`
 - `storage.rules`
 
+## 4.1 Enable Stage Emails (Firebase Extension)
+
+Install Firebase Extension:
+
+- `Trigger Email` (`firebase/firestore-send-email`)
+
+During setup:
+
+1. Set collection path to the same value as `FIREBASE_EMAIL_COLLECTION` (default `mail`).
+2. Configure SMTP settings (or your provider credentials) in extension params.
+3. Save and deploy extension.
+
+How this works:
+
+- App server actions add email docs to the configured mail collection.
+- Extension sends actual stage update emails (applied, advanced, rejected, selected, interview scheduled).
+
 ## 5. Seed Test Data
 
 For quick user testing, seed jobs and demo user profiles:
@@ -86,6 +119,10 @@ Or full end-to-end pipeline:
 - `applications/{applicationId}`
 - `candidateAssessments/{assessmentId}`
 - `transparencyReports/{reportId}`
+- `transparencyReports/job-{jobId}` (single canonical report per job)
+- `interviewSessions/{sessionId}`
+- `interviewTranscripts/{transcriptId}`
+- `candidateProfiles/{candidateId}`
 
 ## Multi-Tenant Model
 

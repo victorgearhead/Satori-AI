@@ -66,10 +66,41 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    match /candidateProfiles/{candidateId} {
+      allow read, create, update: if signedIn() && request.auth.uid == candidateId;
+      allow delete: if false;
+    }
+
     match /transparencyReports/{reportId} {
-      allow read: if signedIn() && (
+      allow read: if (
+        resource.data.publicVisibility == true
+        || (signedIn() && (
         resource.data.candidateId == request.auth.uid
         || recruiterForCompany(resource.data.companyId)
+      )));
+
+      allow create, update: if signedIn() && recruiterForCompany(request.resource.data.companyId);
+      allow delete: if false;
+    }
+
+    match /interviewSessions/{sessionId} {
+      allow read: if signedIn() && (
+        recruiterForCompany(resource.data.companyId)
+        || request.auth.uid in resource.data.candidateIds
+      );
+
+      allow create: if signedIn() && recruiterForCompany(request.resource.data.companyId);
+
+      allow update: if signedIn() && recruiterForCompany(resource.data.companyId)
+        && request.resource.data.companyId == resource.data.companyId;
+
+      allow delete: if false;
+    }
+
+    match /interviewTranscripts/{transcriptId} {
+      allow read: if signedIn() && (
+        recruiterForCompany(resource.data.companyId)
+        || resource.data.candidateId == request.auth.uid
       );
 
       allow create, update: if signedIn() && recruiterForCompany(request.resource.data.companyId);

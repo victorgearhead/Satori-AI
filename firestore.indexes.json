@@ -17,6 +17,15 @@
       ]
     },
     {
+      "collectionGroup": "applications",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "jobId", "order": "ASCENDING" },
+        { "fieldPath": "companyId", "order": "ASCENDING" },
+        { "fieldPath": "appliedDate", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "candidateAssessments",
       "queryScope": "COLLECTION",
       "fields": [
@@ -30,6 +39,30 @@
       "fields": [
         { "fieldPath": "companyId", "order": "ASCENDING" },
         { "fieldPath": "postedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "interviewSessions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "companyId", "order": "ASCENDING" },
+        { "fieldPath": "startTimeIso", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "interviewSessions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "candidateIds", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "startTimeIso", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "interviewTranscripts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "sessionId", "order": "ASCENDING" },
+        { "fieldPath": "candidateId", "order": "ASCENDING" }
       ]
     }
   ],

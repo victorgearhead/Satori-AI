@@ -13,6 +13,7 @@ import { getApplications, getJobs } from '@/lib/database'
 import type { Application, Job } from '@/lib/types'
 import { useAuth } from '@/components/AuthProvider'
 import { useToast } from '@/hooks/use-toast'
+import Link from 'next/link'
 
 export default function RecruiterDashboard() {
   const { profile, loading } = useAuth()
@@ -89,11 +90,42 @@ export default function RecruiterDashboard() {
             <p className="text-slate-500 font-medium">Manage your specific {recruiterCompanyName} talent pipeline and transparency audits.</p>
           </div>
           <div className="flex items-center gap-3">
-            <Button className="h-11 px-8 bg-primary hover:bg-primary/90 shadow-xl shadow-primary/20 font-bold rounded-xl">
-              <Plus size={18} className="mr-2" /> Create New Role
-            </Button>
+            <Link href="/recruiter/interviews">
+              <Button variant="outline" className="h-11 px-6 border-slate-300 font-bold rounded-xl">
+                Interview Ops
+              </Button>
+            </Link>
+            <Link href="/recruiter/jobs/new">
+              <Button className="h-11 px-8 bg-primary hover:bg-primary/90 shadow-xl shadow-primary/20 font-bold rounded-xl">
+                <Plus size={18} className="mr-2" /> Create New Role
+              </Button>
+            </Link>
           </div>
         </header>
+
+        <section className="mb-10">
+          <Card className="border-slate-200">
+            <CardHeader>
+              <CardTitle className="text-lg">Open Positions</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {companyJobs.length === 0 && (
+                <p className="text-sm text-slate-400">No open positions yet.</p>
+              )}
+              {companyJobs.map((job) => (
+                <div key={job.id} className="border rounded-lg p-3 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="font-bold text-slate-900">{job.title}</p>
+                    <p className="text-xs text-slate-500">{job.location}</p>
+                  </div>
+                  <Link href={`/recruiter/jobs/${job.id}/pipeline`}>
+                    <Button variant="outline">Manage Pipeline</Button>
+                  </Link>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </section>
 
         <div className="grid md:grid-cols-4 gap-6 mb-10">
           {stats.map((stat, i) => (
