@@ -10,6 +10,7 @@ import { evaluateSolutionAndProvideFeedback } from '@/ai/flows/evaluate-solution
 import { detectSubmissionAuthenticity } from '@/ai/flows/detect-submission-authenticity';
 import { createGoogleMeetEvent } from '@/lib/google-calendar';
 import { analyzeInterviewTranscript } from '@/ai/flows/analyze-interview-transcript';
+import { analyzeResumeFitForJob } from '@/ai/flows/analyze-resume-fit-for-job';
 import {
   DEFAULT_PIPELINE_STAGES,
   extractSkillsFromResume,
@@ -58,6 +59,7 @@ const updateInterviewSessionSchema = z.object({
   endTimeIso: z.string().datetime().optional(),
   timezone: z.string().min(1).optional(),
   status: z.enum(['Scheduled', 'Completed', 'Cancelled']).optional(),
+  meetLink: z.string().url().optional(),
 });
 
 const saveInterviewTranscriptSchema = z.object({
@@ -78,6 +80,11 @@ const finalizeTransparencyReportSchema = z.object({
   decidingFactor: z.string().min(10),
 });
 
+const backfillTransparencyAccessSchema = z.object({
+  idToken: z.string().min(10),
+  jobId: z.string().min(1),
+});
+
 const ingestBotTranscriptSchema = z.object({
   sessionId: z.string().min(1),
   candidateId: z.string().min(1),
@@ -95,7 +102,7 @@ const createJobPostingSchema = z.object({
   type: z.enum(['Full-time', 'Contract', 'Remote']),
   description: z.string().min(20),
   requirements: z.array(z.string().min(2)).min(1),
-  tags: z.array(z.string().min(1)).min(1),
+  tags: z.array(z.string().min(1)).default([]),
   pipelineStages: z
     .array(
       z.object({
@@ -125,6 +132,17 @@ const advanceApplicationStageSchema = z.object({
   idToken: z.string().min(10),
   applicationId: z.string().min(1),
   decision: z.enum(['advance', 'reject']),
+  decisionReasonCategory: z.enum([
+    'skills-gap',
+    'communication',
+    'problem-solving',
+    'culture-fit',
+    'timeline-mismatch',
+    'compensation',
+    'other',
+  ]),
+  evidenceBullets: z.array(z.string().min(5)).min(1).max(5),
+  rubricScore: z.number().int().min(0).max(100),
   note: z.string().optional(),
 });
 
@@ -132,6 +150,11 @@ const analyzeResumeAndAutoApplySchema = z.object({
   idToken: z.string().min(10),
   cvUrl: z.string().url(),
   threshold: z.number().min(50).max(100).optional(),
+});
+
+const analyzeCandidateResumeFitSchema = z.object({
+  idToken: z.string().min(10),
+  applicationId: z.string().min(1),
 });
 
 type RecruiterApplicationRecord = {
@@ -294,6 +317,19 @@ async function upsertJobTransparencyReport(args: {
   const existing = await reportRef.get();
   const data = existing.exists ? (existing.data() as Record<string, unknown>) : null;
 
+  const jobApplicationsSnapshot = await adminDb
+    .collection('applications')
+    .where('jobId', '==', args.jobId)
+    .get();
+
+  const allowedCandidateIds = Array.from(
+    new Set(
+      jobApplicationsSnapshot.docs
+        .map((doc) => String(doc.data().candidateId ?? ''))
+        .filter(Boolean)
+    )
+  );
+
   const applicationSnapshot = await adminDb
     .collection('applications')
     .where('jobId', '==', args.jobId)
@@ -366,6 +402,7 @@ async function upsertJobTransparencyReport(args: {
       transcriptSummary: redactPII(args.transcriptSummary),
       transcriptHighlights: args.transcriptHighlights.map((item) => redactPII(item)),
       publicVisibility: args.publicVisibility,
+      allowedCandidateIds,
       anonymizedCandidates: nextCandidates,
       piiRedactionEnabled: true,
       updatedAt: FieldValue.serverTimestamp(),
@@ -375,6 +412,115 @@ async function upsertJobTransparencyReport(args: {
     },
     { merge: true }
   );
+
+  return reportId;
+}
+
+async function markReportAvailableForJobApplications(jobId: string) {
+  const applicationsSnapshot = await adminDb
+    .collection('applications')
+    .where('jobId', '==', jobId)
+    .get();
+
+  if (applicationsSnapshot.empty) {
+    return;
+  }
+
+  await Promise.all(
+    applicationsSnapshot.docs.map((doc) =>
+      doc.ref.set(
+        {
+          transparencyReportAvailable: true,
+          hasReport: true,
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      )
+    )
+  );
+}
+
+async function reconcileJobTransparency(jobId: string, recruiterCompanyId: string, jobTitle: string) {
+  const applicationsSnapshot = await adminDb
+    .collection('applications')
+    .where('jobId', '==', jobId)
+    .get();
+
+  if (applicationsSnapshot.empty) {
+    return null;
+  }
+
+  const reportId = `job-${jobId}`;
+  const reportRef = adminDb.collection('transparencyReports').doc(reportId);
+  const reportSnapshot = await reportRef.get();
+  const reportData = reportSnapshot.exists
+    ? (reportSnapshot.data() as Record<string, unknown>)
+    : null;
+
+  const publicVisibility = Boolean(reportData?.publicVisibility);
+  const existingCandidates = Array.isArray(reportData?.anonymizedCandidates)
+    ? (reportData?.anonymizedCandidates as Array<Record<string, unknown>>)
+    : [];
+  const existingCandidateIds = new Set(
+    existingCandidates.map((entry) => String(entry.candidateId ?? '')).filter(Boolean)
+  );
+
+  for (const applicationDoc of applicationsSnapshot.docs) {
+    const app = applicationDoc.data() as {
+      candidateId: string;
+      logicScore?: number;
+      matchScore?: number;
+      jobTitle?: string;
+      status?: string;
+    };
+
+    if (!existingCandidateIds.has(app.candidateId)) {
+      const baseline =
+        typeof app.logicScore === 'number'
+          ? app.logicScore
+          : typeof app.matchScore === 'number'
+            ? app.matchScore
+            : app.status === 'Hired'
+              ? 80
+              : 50;
+
+      await upsertJobTransparencyReport({
+        recruiterCompanyId,
+        sessionId: '',
+        jobId,
+        jobTitle: app.jobTitle ?? jobTitle,
+        candidateId: app.candidateId,
+        transcriptSummary:
+          'Reconciled transparency entry generated automatically from application and stage data.',
+        transcriptHighlights: [`Current status: ${app.status ?? 'Pending'}`],
+        communicationScore: baseline,
+        problemSolvingScore: baseline,
+        confidenceScore: baseline,
+        publicVisibility,
+      });
+    }
+  }
+
+  const allowedCandidateIds = Array.from(
+    new Set(
+      applicationsSnapshot.docs
+        .map((doc) => String(doc.data().candidateId ?? ''))
+        .filter(Boolean)
+    )
+  );
+
+  await reportRef.set(
+    {
+      jobId,
+      companyId: recruiterCompanyId,
+      jobTitle,
+      allowedCandidateIds,
+      updatedAt: FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
+
+  await markReportAvailableForJobApplications(jobId);
 
   return reportId;
 }
@@ -486,10 +632,10 @@ export async function submitJobApplication(
     cvUrl: payload.cvUrl ?? null,
     coverLetter: payload.coverLetter,
     logicScore: null,
-    transparencyReportAvailable: false,
+    transparencyReportAvailable: true,
     matchScore: 0,
     currentStage: firstStage?.name ?? 'Application Review',
-    hasReport: false,
+    hasReport: true,
     company: job.company,
     companyId: job.companyId,
     jobTitle: job.title,
@@ -513,6 +659,23 @@ export async function submitJobApplication(
     ].join('\n'),
   });
 
+  await upsertJobTransparencyReport({
+    recruiterCompanyId: job.companyId,
+    sessionId: '',
+    jobId: payload.jobId,
+    jobTitle: job.title,
+    candidateId: uid,
+    transcriptSummary:
+      'Application submitted. Detailed transcript insights will be added after interview analysis.',
+    transcriptHighlights: ['Application profile initialized for transparent comparison.'],
+    communicationScore: 50,
+    problemSolvingScore: 50,
+    confidenceScore: 50,
+    publicVisibility: false,
+  });
+
+  await reconcileJobTransparency(payload.jobId, job.companyId, job.title);
+
   return {
     applicationId,
   };
@@ -522,6 +685,9 @@ export async function createJobPosting(
   input: z.infer<typeof createJobPostingSchema>
 ) {
   const payload = createJobPostingSchema.parse(input);
+  const tags = payload.tags
+    .map((tag) => tag.trim())
+    .filter(Boolean);
   const decoded = await adminAuth.verifyIdToken(payload.idToken);
   const recruiter = await assertRecruiterRole(decoded.uid);
 
@@ -536,7 +702,7 @@ export async function createJobPosting(
     description: payload.description,
     requirements: payload.requirements,
     postedAt: new Date().toISOString().slice(0, 10),
-    tags: payload.tags,
+    tags,
     pipelineStages:
       payload.pipelineStages && payload.pipelineStages.length > 0
         ? payload.pipelineStages
@@ -590,9 +756,12 @@ export async function advanceApplicationStage(
   const application = appSnapshot.data() as {
     jobId: string;
     companyId: string;
+    candidateId: string;
     email?: string;
     candidateName?: string;
     jobTitle?: string;
+    logicScore?: number;
+    matchScore?: number;
     pipelineStageIndex?: number;
     currentStage?: string;
     stageHistory?: Array<Record<string, unknown>>;
@@ -604,7 +773,7 @@ export async function advanceApplicationStage(
 
   const jobSnapshot = await adminDb.collection('jobs').doc(application.jobId).get();
   const job = jobSnapshot.exists
-    ? (jobSnapshot.data() as { pipelineStages?: PipelineStage[] })
+    ? (jobSnapshot.data() as { title?: string; pipelineStages?: PipelineStage[] })
     : null;
   const stages =
     job && Array.isArray(job.pipelineStages) && job.pipelineStages.length > 0
@@ -622,6 +791,11 @@ export async function advanceApplicationStage(
       stageId: currentStage.id,
       stageName: currentStage.name,
       status: 'rejected',
+      actorUid: decoded.uid,
+      actorRole: 'recruiter',
+      decisionReasonCategory: payload.decisionReasonCategory,
+      evidenceBullets: payload.evidenceBullets,
+      rubricScore: payload.rubricScore,
       note: payload.note ?? '',
       updatedAt: new Date().toISOString(),
     });
@@ -630,8 +804,49 @@ export async function advanceApplicationStage(
       status: 'Rejected',
       currentStage: currentStage.name,
       stageHistory: history,
+      transparencyReportAvailable: true,
+      hasReport: true,
       updatedAt: FieldValue.serverTimestamp(),
     });
+
+    // Ensure rejected candidates still receive a job-level comparison report.
+    const baselineScore =
+      typeof application.logicScore === 'number'
+        ? application.logicScore
+        : typeof application.matchScore === 'number'
+          ? application.matchScore
+          : 50;
+
+    await upsertJobTransparencyReport({
+      recruiterCompanyId: recruiter.companyId,
+      sessionId: '',
+      jobId: application.jobId,
+      jobTitle: application.jobTitle ?? job?.title ?? 'Role',
+      candidateId: application.candidateId,
+      transcriptSummary:
+        'No meeting transcript available. Decision reflects stage performance and application quality review.',
+      transcriptHighlights: payload.note
+        ? [
+            `Reason category: ${payload.decisionReasonCategory}`,
+            ...payload.evidenceBullets,
+            payload.note,
+          ]
+        : [
+            `Rejected at stage: ${currentStage.name}`,
+            `Reason category: ${payload.decisionReasonCategory}`,
+            ...payload.evidenceBullets,
+          ],
+      communicationScore: baselineScore,
+      problemSolvingScore: baselineScore,
+      confidenceScore: baselineScore,
+      publicVisibility: false,
+    });
+
+    await reconcileJobTransparency(
+      application.jobId,
+      recruiter.companyId,
+      application.jobTitle ?? job?.title ?? 'Role'
+    );
 
     await queueStageNotificationEmail({
       toEmail: application.email ?? '',
@@ -640,6 +855,8 @@ export async function advanceApplicationStage(
         `Hi ${application.candidateName ?? 'Candidate'},`,
         '',
         `Status update for ${application.jobTitle ?? 'your application'}: Not moved forward at ${currentStage.name}.`,
+        `Decision category: ${payload.decisionReasonCategory}.`,
+        `Rubric score: ${payload.rubricScore}/100.`,
         payload.note ? `Reviewer note: ${payload.note}` : '',
         '',
         'You can review transparency insights in your dashboard when available.',
@@ -655,6 +872,11 @@ export async function advanceApplicationStage(
     stageId: currentStage.id,
     stageName: currentStage.name,
     status: 'advanced',
+    actorUid: decoded.uid,
+    actorRole: 'recruiter',
+    decisionReasonCategory: payload.decisionReasonCategory,
+    evidenceBullets: payload.evidenceBullets,
+    rubricScore: payload.rubricScore,
     note: payload.note ?? '',
     updatedAt: new Date().toISOString(),
   });
@@ -674,6 +896,8 @@ export async function advanceApplicationStage(
         `Hi ${application.candidateName ?? 'Candidate'},`,
         '',
         `Great news. You have been selected for ${application.jobTitle ?? 'the role'}.`,
+        `Decision category: ${payload.decisionReasonCategory}.`,
+        `Rubric score: ${payload.rubricScore}/100.`,
         payload.note ? `Message from recruiter: ${payload.note}` : '',
         '',
         'You can view final report details once closure is completed.',
@@ -681,6 +905,74 @@ export async function advanceApplicationStage(
         .filter(Boolean)
         .join('\n'),
     });
+
+    const reportId = await upsertJobTransparencyReport({
+      recruiterCompanyId: recruiter.companyId,
+      sessionId: '',
+      jobId: application.jobId,
+      jobTitle: application.jobTitle ?? job?.title ?? 'Role',
+      candidateId: application.candidateId,
+      transcriptSummary:
+        'Candidate reached final hiring stage and was selected. Comparison report updated automatically.',
+      transcriptHighlights: [
+        'Selected through pipeline progression.',
+        `Decision category: ${payload.decisionReasonCategory}`,
+        `Rubric score: ${payload.rubricScore}/100`,
+        ...payload.evidenceBullets,
+      ],
+      communicationScore:
+        typeof application.logicScore === 'number'
+          ? application.logicScore
+          : typeof application.matchScore === 'number'
+            ? application.matchScore
+            : 80,
+      problemSolvingScore:
+        typeof application.logicScore === 'number'
+          ? application.logicScore
+          : typeof application.matchScore === 'number'
+            ? application.matchScore
+            : 80,
+      confidenceScore:
+        typeof application.logicScore === 'number'
+          ? application.logicScore
+          : typeof application.matchScore === 'number'
+            ? application.matchScore
+            : 80,
+      publicVisibility: false,
+    });
+
+    const reportRef = adminDb.collection('transparencyReports').doc(reportId);
+    const reportSnapshot = await reportRef.get();
+    if (reportSnapshot.exists) {
+      const reportData = reportSnapshot.data() as Record<string, unknown>;
+      const candidates = Array.isArray(reportData.anonymizedCandidates)
+        ? (reportData.anonymizedCandidates as Array<Record<string, unknown>>)
+        : [];
+
+      const updatedCandidates = candidates.map((entry) => ({
+        ...entry,
+        status:
+          String(entry.candidateId) === application.candidateId ? 'Selected' : 'NotSelected',
+      }));
+
+      await reportRef.set(
+        {
+          candidateId: application.candidateId,
+          decidingFactor:
+            payload.note?.trim() ||
+            'Auto-finalized by pipeline stage progression (selected at final stage).',
+          anonymizedCandidates: updatedCandidates,
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+    }
+
+    await reconcileJobTransparency(
+      application.jobId,
+      recruiter.companyId,
+      application.jobTitle ?? job?.title ?? 'Role'
+    );
 
     return { ok: true, status: 'Hired' };
   }
@@ -704,6 +996,8 @@ export async function advanceApplicationStage(
       '',
       `You have progressed to the next stage for ${application.jobTitle ?? 'your application'}.`,
       `Current stage: ${nextStage.name}.`,
+        `Decision category: ${payload.decisionReasonCategory}.`,
+        `Rubric score: ${payload.rubricScore}/100.`,
       payload.note ? `Reviewer note: ${payload.note}` : '',
       '',
       'Please check your dashboard for process details and timelines.',
@@ -793,10 +1087,10 @@ export async function analyzeResumeAndAutoApply(
           cvUrl: payload.cvUrl,
           coverLetter: 'Auto-applied based on resume match engine.',
           logicScore: null,
-          transparencyReportAvailable: false,
+          transparencyReportAvailable: true,
           matchScore: match.score,
           currentStage: firstStage.name,
-          hasReport: false,
+          hasReport: true,
           company: job.company,
           companyId: job.companyId,
           jobTitle: job.title,
@@ -806,6 +1100,23 @@ export async function analyzeResumeAndAutoApply(
           createdAt: FieldValue.serverTimestamp(),
           updatedAt: FieldValue.serverTimestamp(),
         });
+
+        await upsertJobTransparencyReport({
+          recruiterCompanyId: job.companyId,
+          sessionId: '',
+          jobId: job.id,
+          jobTitle: job.title,
+          candidateId: uid,
+          transcriptSummary:
+            'Auto-applied candidate profile added. Interview transcript insights will appear after interview processing.',
+          transcriptHighlights: [`Auto-apply match score: ${match.score}%`],
+          communicationScore: match.score,
+          problemSolvingScore: match.score,
+          confidenceScore: match.score,
+          publicVisibility: false,
+        });
+
+        await reconcileJobTransparency(job.id, job.companyId, job.title);
 
         await queueStageNotificationEmail({
           toEmail: candidate.email,
@@ -843,6 +1154,87 @@ export async function analyzeResumeAndAutoApply(
     autoAppliedCount,
     extractedSkills: skills,
     recommendations,
+  };
+}
+
+export async function analyzeCandidateResumeFit(
+  input: z.infer<typeof analyzeCandidateResumeFitSchema>
+) {
+  const payload = analyzeCandidateResumeFitSchema.parse(input);
+  const decoded = await adminAuth.verifyIdToken(payload.idToken);
+  const recruiter = await assertRecruiterRole(decoded.uid);
+
+  const applicationSnapshot = await adminDb
+    .collection('applications')
+    .doc(payload.applicationId)
+    .get();
+
+  if (!applicationSnapshot.exists) {
+    throw new Error('Application not found.');
+  }
+
+  const application = applicationSnapshot.data() as {
+    companyId: string;
+    jobId: string;
+    cvUrl?: string | null;
+    candidateId: string;
+  };
+
+  if (application.companyId !== recruiter.companyId) {
+    throw new Error('Not authorized to analyze this application.');
+  }
+
+  if (!application.cvUrl) {
+    throw new Error('Candidate resume is not available for this application.');
+  }
+
+  const jobSnapshot = await adminDb.collection('jobs').doc(application.jobId).get();
+  if (!jobSnapshot.exists) {
+    throw new Error('Associated job not found.');
+  }
+
+  const job = jobSnapshot.data() as {
+    companyId: string;
+    title: string;
+    description: string;
+    requirements?: string[];
+    tags?: string[];
+  };
+
+  if (job.companyId !== recruiter.companyId) {
+    throw new Error('Not authorized to analyze this job.');
+  }
+
+  const resumeText = await extractPdfTextFromUrl(application.cvUrl);
+  const analysis = await analyzeResumeFitForJob({
+    jobTitle: job.title,
+    jobDescription: job.description,
+    requirements: Array.isArray(job.requirements) ? job.requirements : [],
+    tags: Array.isArray(job.tags) ? job.tags : [],
+    resumeText,
+  });
+
+  await applicationSnapshot.ref.set(
+    {
+      aiResumeFit: {
+        score: analysis.overallMatchScore,
+        matchedSkills: analysis.matchedSkills,
+        missingSkills: analysis.missingSkills,
+        strengths: analysis.strengths,
+        concerns: analysis.concerns,
+        summary: analysis.summary,
+        analyzedAt: new Date().toISOString(),
+      },
+      updatedAt: FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
+
+  return {
+    applicationId: payload.applicationId,
+    candidateId: application.candidateId,
+    cvUrl: application.cvUrl,
+    ...analysis,
   };
 }
 
@@ -904,14 +1296,36 @@ export async function createInterviewSession(
     .map((application) => String(application.email ?? ''))
     .filter((email) => email.length > 0);
 
-  const meet = await createGoogleMeetEvent({
-    title: payload.title,
-    description: payload.description,
-    startTimeIso: payload.startTimeIso,
-    endTimeIso: payload.endTimeIso,
-    timezone: payload.timezone,
-    attendeeEmails: Array.from(new Set(candidateEmails)),
-  });
+  let meetLink = '';
+  let calendarEventId: string | null = null;
+  let calendarFallbackUsed = false;
+  const calendarEnabled = process.env.GOOGLE_CALENDAR_ENABLED === 'true';
+
+  if (calendarEnabled) {
+    try {
+      const meet = await createGoogleMeetEvent({
+        title: payload.title,
+        description: payload.description,
+        startTimeIso: payload.startTimeIso,
+        endTimeIso: payload.endTimeIso,
+        timezone: payload.timezone,
+        attendeeEmails: Array.from(new Set(candidateEmails)),
+      });
+      meetLink = meet.meetLink;
+      calendarEventId = meet.eventId;
+    } catch (error) {
+      calendarFallbackUsed = true;
+      console.error('Interview calendar fallback activated', error);
+    }
+  }
+
+  if (!meetLink) {
+    const fallbackLink = process.env.DEFAULT_INTERVIEW_MEET_URL?.trim();
+    if (fallbackLink) {
+      meetLink = fallbackLink;
+      calendarFallbackUsed = true;
+    }
+  }
 
   const sessionId = randomUUID();
   await adminDb.collection('interviewSessions').doc(sessionId).set({
@@ -924,8 +1338,8 @@ export async function createInterviewSession(
     startTimeIso: payload.startTimeIso,
     endTimeIso: payload.endTimeIso,
     timezone: payload.timezone,
-    meetLink: meet.meetLink,
-    calendarEventId: meet.eventId,
+    meetLink,
+    calendarEventId,
     candidateIds,
     candidateEmails: Array.from(new Set(candidateEmails)),
     status: 'Scheduled',
@@ -955,17 +1369,27 @@ export async function createInterviewSession(
           `Your interview for ${job.title} has been scheduled.`,
           `Start: ${new Date(payload.startTimeIso).toLocaleString()}`,
           `End: ${new Date(payload.endTimeIso).toLocaleString()}`,
-          `Google Meet: ${meet.meetLink}`,
+          meetLink
+            ? `Meeting Link: ${meetLink}`
+            : 'Meeting link will be shared by recruiter shortly.',
+          calendarFallbackUsed
+            ? 'Note: This link was configured as a fallback because Google Calendar write access is unavailable.'
+            : '',
           '',
           'Please join on time and keep your notifications enabled for next-stage updates.',
-        ].join('\n'),
+        ]
+          .filter(Boolean)
+          .join('\n'),
       })
     )
   );
 
+  await reconcileJobTransparency(payload.jobId, recruiter.companyId, job.title);
+
   return {
     sessionId,
-    meetLink: meet.meetLink,
+    meetLink,
+    calendarFallbackUsed,
   };
 }
 
@@ -997,6 +1421,7 @@ export async function updateInterviewSession(
   if (payload.endTimeIso) updates.endTimeIso = payload.endTimeIso;
   if (payload.timezone) updates.timezone = payload.timezone;
   if (payload.status) updates.status = payload.status;
+  if (payload.meetLink) updates.meetLink = payload.meetLink;
 
   await sessionRef.update(updates);
 
@@ -1085,6 +1510,8 @@ export async function saveInterviewTranscript(
     publicVisibility: payload.publicVisibility,
   });
 
+  await reconcileJobTransparency(session.jobId, recruiter.companyId, session.jobTitle);
+
   return {
     transcriptId,
     reportId,
@@ -1120,18 +1547,141 @@ export async function finalizeTransparencyReport(
       String(entry.candidateId) === payload.selectedCandidateId ? 'Selected' : 'NotSelected',
   }));
 
+  const jobApplicationsSnapshot = await adminDb
+    .collection('applications')
+    .where('jobId', '==', payload.jobId)
+    .get();
+
+  const allowedCandidateIds = Array.from(
+    new Set(
+      jobApplicationsSnapshot.docs
+        .map((doc) => String(doc.data().candidateId ?? ''))
+        .filter(Boolean)
+    )
+  );
+
   await reportRef.set(
     {
       candidateId: payload.selectedCandidateId,
       decidingFactor: redactPII(payload.decidingFactor),
+      allowedCandidateIds,
       anonymizedCandidates: updatedCandidates,
       updatedAt: FieldValue.serverTimestamp(),
     },
     { merge: true }
   );
 
+  await Promise.all(
+    jobApplicationsSnapshot.docs.map((doc) =>
+      doc.ref.set(
+        {
+          transparencyReportAvailable: true,
+          hasReport: true,
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      )
+    )
+  );
+
+  await reconcileJobTransparency(
+    payload.jobId,
+    recruiter.companyId,
+    String(data.jobTitle ?? 'Role')
+  );
+
   return {
     reportId,
+  };
+}
+
+export async function backfillTransparencyAccessForJob(
+  input: z.infer<typeof backfillTransparencyAccessSchema>
+) {
+  const payload = backfillTransparencyAccessSchema.parse(input);
+  const decodedToken = await adminAuth.verifyIdToken(payload.idToken);
+  const recruiter = await assertRecruiterRole(decodedToken.uid);
+
+  const jobRef = adminDb.collection('jobs').doc(payload.jobId);
+  const jobSnapshot = await jobRef.get();
+  if (!jobSnapshot.exists) {
+    throw new Error('Job not found.');
+  }
+
+  const job = jobSnapshot.data() as { title?: string; companyId: string };
+  if (job.companyId !== recruiter.companyId) {
+    throw new Error('Not authorized to backfill this job report.');
+  }
+
+  const applicationsSnapshot = await adminDb
+    .collection('applications')
+    .where('jobId', '==', payload.jobId)
+    .get();
+
+  if (applicationsSnapshot.empty) {
+    throw new Error('No applications found for this job.');
+  }
+
+  const reportRef = adminDb.collection('transparencyReports').doc(`job-${payload.jobId}`);
+  const reportSnapshot = await reportRef.get();
+  const reportData = reportSnapshot.exists
+    ? (reportSnapshot.data() as Record<string, unknown>)
+    : null;
+  const visibility = Boolean(reportData?.publicVisibility);
+
+  for (const doc of applicationsSnapshot.docs) {
+    const app = doc.data() as {
+      candidateId: string;
+      status?: string;
+      logicScore?: number;
+      matchScore?: number;
+      jobTitle?: string;
+    };
+
+    const baselineScore =
+      typeof app.logicScore === 'number'
+        ? app.logicScore
+        : typeof app.matchScore === 'number'
+          ? app.matchScore
+          : 50;
+
+    await upsertJobTransparencyReport({
+      recruiterCompanyId: recruiter.companyId,
+      sessionId: '',
+      jobId: payload.jobId,
+      jobTitle: app.jobTitle ?? job.title ?? 'Role',
+      candidateId: app.candidateId,
+      transcriptSummary:
+        'Backfilled report entry generated from available application and stage data.',
+      transcriptHighlights: [
+        `Application status: ${app.status ?? 'Pending'}`,
+        'Transcript data may be unavailable for this candidate.',
+      ],
+      communicationScore: baselineScore,
+      problemSolvingScore: baselineScore,
+      confidenceScore: baselineScore,
+      publicVisibility: visibility,
+    });
+  }
+
+  await Promise.all(
+    applicationsSnapshot.docs.map((doc) =>
+      doc.ref.set(
+        {
+          transparencyReportAvailable: true,
+          hasReport: true,
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      )
+    )
+  );
+
+  await reconcileJobTransparency(payload.jobId, recruiter.companyId, job.title ?? 'Role');
+
+  return {
+    reportId: `job-${payload.jobId}`,
+    applicationsUpdated: applicationsSnapshot.size,
   };
 }
 
@@ -1189,6 +1739,8 @@ export async function ingestInterviewTranscriptFromBot(
     confidenceScore: analysis.confidenceScore,
     publicVisibility: payload.publicVisibility,
   });
+
+  await reconcileJobTransparency(session.jobId, session.companyId, session.jobTitle);
 
   return {
     transcriptId,

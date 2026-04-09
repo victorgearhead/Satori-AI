@@ -211,6 +211,15 @@ export async function getApplications(companyId?: string): Promise<Application[]
   return snapshot.docs.map((appDoc) => toApplication(appDoc.id, appDoc.data()));
 }
 
+export async function getApplication(applicationId: string): Promise<Application | null> {
+  const snapshot = await getDoc(doc(db, 'applications', applicationId));
+  if (!snapshot.exists()) {
+    return null;
+  }
+
+  return toApplication(snapshot.id, snapshot.data());
+}
+
 export async function getCandidateApplications(
   candidateId: string
 ): Promise<Application[]> {

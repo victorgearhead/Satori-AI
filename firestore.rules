@@ -30,7 +30,8 @@ service cloud.firestore {
     }
 
     match /jobs/{jobId} {
-      allow read: if signedIn();
+      // Job board is public: anyone can browse listings.
+      allow read: if true;
       allow create: if signedIn() && recruiterForCompany(request.resource.data.companyId);
       allow update: if signedIn()
         && recruiterForCompany(resource.data.companyId)
@@ -76,6 +77,8 @@ service cloud.firestore {
         resource.data.publicVisibility == true
         || (signedIn() && (
         resource.data.candidateId == request.auth.uid
+        || (resource.data.allowedCandidateIds is list
+          && request.auth.uid in resource.data.allowedCandidateIds)
         || recruiterForCompany(resource.data.companyId)
       )));
 

@@ -36,13 +36,42 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 async function getOrCreateUserProfile(
   user: FirebaseUser,
   role: UserRole,
-  companyId?: string
+  companyId?: string,
+  options?: {
+    forceRoleUpdate?: boolean;
+  }
 ): Promise<UserProfile> {
   const ref = doc(db, 'users', user.uid);
   const snapshot = await getDoc(ref);
 
   if (snapshot.exists()) {
     const profile = snapshot.data() as Omit<UserProfile, 'uid'>;
+
+    if (options?.forceRoleUpdate) {
+      const updatedProfile: Omit<UserProfile, 'uid'> = {
+        ...profile,
+        role,
+        ...(role === 'recruiter' ? { companyId } : {}),
+        ...(role === 'candidate' ? { companyId: undefined } : {}),
+        updatedAt: new Date().toISOString(),
+      };
+
+      await setDoc(
+        ref,
+        {
+          role,
+          ...(role === 'recruiter' ? { companyId } : { companyId: null }),
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      return {
+        uid: user.uid,
+        ...updatedProfile,
+      };
+    }
+
     return {
       uid: user.uid,
       ...profile,
@@ -54,7 +83,7 @@ async function getOrCreateUserProfile(
     email: user.email ?? '',
     displayName: user.displayName ?? 'Anonymous User',
     role,
-    companyId,
+    ...(companyId ? { companyId } : {}),
     createdAt: now,
     updatedAt: now,
   };
@@ -119,7 +148,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       idToken,
       signInAsCandidate: async () => {
         const credential = await signInWithGoogle();
-        const createdProfile = await getOrCreateUserProfile(credential.user, 'candidate');
+        const createdProfile = await getOrCreateUserProfile(credential.user, 'candidate', undefined, {
+          forceRoleUpdate: true,
+        });
         setProfile(createdProfile);
         setIdToken(await credential.user.getIdToken());
       },
@@ -128,7 +159,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const createdProfile = await getOrCreateUserProfile(
           credential.user,
           'recruiter',
-          companyId
+          companyId,
+          {
+            forceRoleUpdate: true,
+          }
         );
         setProfile(createdProfile);
         setIdToken(await credential.user.getIdToken());

@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Navigation } from '@/components/Navigation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -8,7 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
-import { Search, Filter, Plus, FileText, MoreHorizontal, UserCheck, Briefcase, Users, CheckCircle2, Building2 } from 'lucide-react'
+import { Search, Plus, FileText, MoreHorizontal, UserCheck, Briefcase, Users, CheckCircle2, Building2 } from 'lucide-react'
 import { getApplications, getJobs } from '@/lib/database'
 import type { Application, Job } from '@/lib/types'
 import { useAuth } from '@/components/AuthProvider'
@@ -17,13 +18,32 @@ import Link from 'next/link'
 
 export default function RecruiterDashboard() {
   const { profile, loading } = useAuth()
+  const router = useRouter()
   const { toast } = useToast()
   const [companyJobs, setCompanyJobs] = useState<Job[]>([])
   const [companyApplications, setCompanyApplications] = useState<Application[]>([])
+  const [searchTerm, setSearchTerm] = useState('')
+  const [statusFilter, setStatusFilter] = useState<'all' | Application['status']>('all')
+  const [sortBy, setSortBy] = useState<'recent' | 'score-desc' | 'score-asc'>('recent')
   const [isLoadingData, setIsLoadingData] = useState(true)
 
   const recruiterCompanyId = profile?.companyId
   const recruiterCompanyName = profile?.companyId?.toUpperCase() ?? 'Your Company'
+
+  useEffect(() => {
+    if (loading) {
+      return
+    }
+
+    if (!profile) {
+      router.replace('/')
+      return
+    }
+
+    if (profile.role !== 'recruiter') {
+      router.replace(profile.role === 'candidate' ? '/dashboard' : '/')
+    }
+  }, [loading, profile, router])
 
   useEffect(() => {
     async function loadRecruiterData() {
@@ -77,6 +97,31 @@ export default function RecruiterDashboard() {
     [companyApplications, companyJobs.length]
   )
 
+  const visibleApplications = useMemo(() => {
+    const normalizedSearch = searchTerm.trim().toLowerCase()
+
+    const filtered = companyApplications.filter((application) => {
+      const matchesSearch =
+        normalizedSearch.length === 0
+        || application.candidateName.toLowerCase().includes(normalizedSearch)
+        || application.email.toLowerCase().includes(normalizedSearch)
+        || application.jobTitle.toLowerCase().includes(normalizedSearch)
+
+      const matchesStatus = statusFilter === 'all' || application.status === statusFilter
+
+      return matchesSearch && matchesStatus
+    })
+
+    const sorted = [...filtered]
+    if (sortBy === 'score-desc') {
+      sorted.sort((a, b) => (b.logicScore ?? 0) - (a.logicScore ?? 0))
+    } else if (sortBy === 'score-asc') {
+      sorted.sort((a, b) => (a.logicScore ?? 0) - (b.logicScore ?? 0))
+    }
+
+    return sorted
+  }, [companyApplications, searchTerm, statusFilter, sortBy])
+
   return (
     <div className="min-h-screen bg-slate-50/50 font-body">
       <Navigation />
@@ -90,11 +135,6 @@ export default function RecruiterDashboard() {
             <p className="text-slate-500 font-medium">Manage your specific {recruiterCompanyName} talent pipeline and transparency audits.</p>
           </div>
           <div className="flex items-center gap-3">
-            <Link href="/recruiter/interviews">
-              <Button variant="outline" className="h-11 px-6 border-slate-300 font-bold rounded-xl">
-                Interview Ops
-              </Button>
-            </Link>
             <Link href="/recruiter/jobs/new">
               <Button className="h-11 px-8 bg-primary hover:bg-primary/90 shadow-xl shadow-primary/20 font-bold rounded-xl">
                 <Plus size={18} className="mr-2" /> Create New Role
@@ -151,11 +191,35 @@ export default function RecruiterDashboard() {
             <div className="flex items-center gap-4">
               <div className="relative w-72">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                <Input placeholder="Search pipeline..." className="pl-10 h-10 bg-white rounded-lg border-slate-200" />
+                <Input
+                  placeholder="Search pipeline..."
+                  className="pl-10 h-10 bg-white rounded-lg border-slate-200"
+                  value={searchTerm}
+                  onChange={(event) => setSearchTerm(event.target.value)}
+                />
               </div>
-              <Button variant="outline" size="sm" className="h-10 border-slate-200 font-bold px-4">
-                <Filter size={16} className="mr-2 text-primary" /> Filters
-              </Button>
+              <select
+                value={statusFilter}
+                onChange={(event) => setStatusFilter(event.target.value as 'all' | Application['status'])}
+                className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700"
+              >
+                <option value="all">All Statuses</option>
+                <option value="Pending">Pending</option>
+                <option value="Screening">Screening</option>
+                <option value="Assessment">Assessment</option>
+                <option value="Interview">Interview</option>
+                <option value="Hired">Hired</option>
+                <option value="Rejected">Rejected</option>
+              </select>
+              <select
+                value={sortBy}
+                onChange={(event) => setSortBy(event.target.value as 'recent' | 'score-desc' | 'score-asc')}
+                className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700"
+              >
+                <option value="recent">Sort: Recent</option>
+                <option value="score-desc">Sort: Score High-Low</option>
+                <option value="score-asc">Sort: Score Low-High</option>
+              </select>
             </div>
           </div>
 
@@ -183,8 +247,8 @@ export default function RecruiterDashboard() {
                       Sign in as a recruiter to view company-isolated data.
                     </TableCell>
                   </TableRow>
-                ) : companyApplications.length > 0 ? (
-                  companyApplications.map((app) => (
+                ) : visibleApplications.length > 0 ? (
+                  visibleApplications.map((app) => (
                     <TableRow key={app.id} className="group hover:bg-slate-50 transition-colors border-slate-100">
                       <TableCell className="py-6">
                         <div className="flex items-center gap-4">
@@ -236,7 +300,7 @@ export default function RecruiterDashboard() {
                 ) : (
                   <TableRow>
                     <TableCell colSpan={5} className="py-20 text-center text-slate-400 font-medium">
-                      No active applicants for {recruiterCompanyName} yet.
+                      No applicants match the current filters.
                     </TableCell>
                   </TableRow>
                 )}

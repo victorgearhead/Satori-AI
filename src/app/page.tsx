@@ -1,8 +1,33 @@
+"use client"
+
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { Brain, Fingerprint, UserCheck, Search, Globe, Scale } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { useAuth } from '@/components/AuthProvider'
 
 export default function LandingPage() {
+  const router = useRouter()
+  const { profile, signInAsCandidate, signInAsRecruiter } = useAuth()
+
+  async function openCandidateConsole() {
+    if (profile?.role === 'candidate') {
+      router.push('/dashboard')
+      return
+    }
+    await signInAsCandidate()
+    router.push('/dashboard')
+  }
+
+  async function openRecruiterPortal() {
+    if (profile?.role === 'recruiter') {
+      router.push('/recruiter')
+      return
+    }
+    await signInAsRecruiter(profile?.companyId ?? 'swiggy')
+    router.push('/recruiter')
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 font-body">
       <header className="container mx-auto px-4 py-8 flex justify-between items-center bg-transparent">
@@ -14,13 +39,12 @@ export default function LandingPage() {
         </div>
         <nav className="hidden md:flex items-center gap-10 text-[11px] font-black uppercase tracking-widest text-slate-500">
           <Link href="/jobs" className="hover:text-primary transition-colors">Job Board</Link>
-          <Link href="/recruiter" className="hover:text-primary transition-colors">Employer Portal</Link>
-          <Link href="/dashboard" className="hover:text-primary transition-colors">Candidate Console</Link>
+          <button onClick={() => void openRecruiterPortal()} className="hover:text-primary transition-colors">Employer Portal</button>
+          <button onClick={() => void openCandidateConsole()} className="hover:text-primary transition-colors">Candidate Console</button>
         </nav>
         <div className="flex gap-4">
-          <Link href="/dashboard">
-            <Button className="bg-slate-900 hover:bg-slate-800 font-bold px-8 h-12 rounded-xl text-xs uppercase tracking-widest">Login</Button>
-          </Link>
+          <Button onClick={() => void openCandidateConsole()} variant="outline" className="font-bold px-6 h-12 rounded-xl text-xs uppercase tracking-widest">Candidate Login</Button>
+          <Button onClick={() => void openRecruiterPortal()} className="bg-slate-900 hover:bg-slate-800 font-bold px-6 h-12 rounded-xl text-xs uppercase tracking-widest">Recruiter Login</Button>
         </div>
       </header>
 
@@ -43,11 +67,9 @@ export default function LandingPage() {
                 Browse Global Roles <Search className="ml-3" size={18} />
               </Button>
             </Link>
-            <Link href="/recruiter">
-              <Button size="lg" variant="outline" className="px-12 h-16 text-sm font-black uppercase tracking-widest border-2 border-slate-200 bg-white hover:bg-slate-50 rounded-2xl">
-                Post for Your Company
-              </Button>
-            </Link>
+            <Button onClick={() => void openRecruiterPortal()} size="lg" variant="outline" className="px-12 h-16 text-sm font-black uppercase tracking-widest border-2 border-slate-200 bg-white hover:bg-slate-50 rounded-2xl">
+              Post for Your Company
+            </Button>
           </div>
         </section>
 

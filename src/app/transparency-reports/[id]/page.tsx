@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import { Navigation } from '@/components/Navigation';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Brain, ArrowLeft, ShieldCheck, Scale, BarChart3, TrendingUp, Briefcase, GraduationCap, Code2, Layers, AlertCircle } from 'lucide-react';
 import Link from 'next/link';
 import { getTransparencyReport } from '@/lib/database';
@@ -61,10 +62,55 @@ export default function TransparencyReportPage() {
   ];
 
   const selectedEntry = report?.anonymizedCandidates?.find((entry) => entry.status === 'Selected');
-  const comparisonEntry = report?.anonymizedCandidates?.find((entry) => entry.status !== 'Selected');
+  const comparisonEntry = report?.anonymizedCandidates?.find(
+    (entry) => entry.candidateId === profile?.uid
+  ) ?? report?.anonymizedCandidates?.find((entry) => entry.status !== 'Selected');
 
   const userMetrics = comparisonEntry?.userMetrics ?? report?.userMetrics;
   const benchmarkMetrics = selectedEntry?.userMetrics ?? report?.hiredMetrics;
+
+  const deltaRows = metrics.map((metric) => {
+    const userValue = userMetrics?.[metric.key] ?? 0;
+    const benchmarkValue = benchmarkMetrics?.[metric.key] ?? 0;
+    return {
+      label: metric.label,
+      userValue,
+      benchmarkValue,
+      delta: benchmarkValue - userValue,
+    };
+  });
+
+  const avgAbsoluteDelta =
+    deltaRows.length > 0
+      ? deltaRows.reduce((acc, row) => acc + Math.abs(row.delta), 0) / deltaRows.length
+      : 0;
+  const evidenceCount =
+    (comparisonEntry?.transcriptHighlights?.length ?? 0)
+    + (report?.transcriptHighlights?.length ?? 0);
+  const confidenceLevel =
+    evidenceCount >= 4 && avgAbsoluteDelta >= 10
+      ? 'High'
+      : evidenceCount >= 2
+        ? 'Medium'
+        : 'Low';
+
+  const improvementActions = deltaRows
+    .filter((row) => row.delta >= 8)
+    .map((row) => {
+      if (row.label === 'Work Experience') {
+        return 'Add measurable outcomes for your most recent role and quantify delivery impact.';
+      }
+      if (row.label === 'Project Complexity') {
+        return 'Ship one production-grade project with scale, architecture notes, and tradeoff writeup.';
+      }
+      if (row.label === 'Internship Pedigree') {
+        return 'Target internships or contract projects in domain-matching companies to improve relevance.';
+      }
+      if (row.label === 'Academic Pedigree') {
+        return 'Compensate academic gap with stronger public proof: OSS, certifications, and technical writing.';
+      }
+      return 'Increase direct hands-on depth in the role stack and document benchmark-aligned outcomes.';
+    });
 
   return (
     <div className="min-h-screen bg-slate-50/50 font-body">
@@ -155,6 +201,40 @@ export default function TransparencyReportPage() {
                         </div>
                       );
                     })}
+                  </div>
+                </section>
+
+                <section className="bg-white rounded-[2rem] border-2 border-slate-100 shadow-xl shadow-slate-200/50 p-8 space-y-6">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-xl font-bold text-slate-900">Deterministic Comparison Summary</h2>
+                    <Badge variant="outline">Confidence: {confidenceLevel}</Badge>
+                  </div>
+
+                  <div className="grid md:grid-cols-2 gap-4">
+                    {deltaRows.map((row) => (
+                      <div key={row.label} className="rounded-xl border border-slate-200 p-4">
+                        <p className="text-sm font-bold text-slate-900">{row.label}</p>
+                        <p className="text-xs text-slate-500 mt-1">
+                          You: {row.userValue}% | Selected: {row.benchmarkValue}%
+                        </p>
+                        <p className={`text-sm font-bold mt-2 ${row.delta > 0 ? 'text-amber-600' : row.delta < 0 ? 'text-emerald-600' : 'text-slate-500'}`}>
+                          Delta: {row.delta > 0 ? '+' : ''}{row.delta}%
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="space-y-3">
+                    <h3 className="text-sm font-bold text-slate-900 uppercase tracking-widest">Concrete Improvement Actions</h3>
+                    {improvementActions.length === 0 ? (
+                      <p className="text-sm text-slate-500">No major benchmark gaps detected. Keep strengthening interview narrative and consistency.</p>
+                    ) : (
+                      <ul className="list-disc pl-5 space-y-2 text-sm text-slate-600">
+                        {improvementActions.map((action, index) => (
+                          <li key={index}>{action}</li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
                 </section>
 

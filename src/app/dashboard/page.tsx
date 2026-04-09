@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Navigation } from '@/components/Navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
@@ -15,11 +16,27 @@ import { useToast } from '@/hooks/use-toast';
 
 export default function CandidateDashboard() {
   const { profile, loading } = useAuth();
+  const router = useRouter();
   const { toast } = useToast();
   const [applications, setApplications] = useState<Application[]>([]);
   const [assessments, setAssessments] = useState<CandidateAssessment[]>([]);
   const [interviews, setInterviews] = useState<InterviewSession[]>([]);
   const [loadingData, setLoadingData] = useState(true);
+
+  useEffect(() => {
+    if (loading) {
+      return;
+    }
+
+    if (!profile) {
+      router.replace('/');
+      return;
+    }
+
+    if (profile.role !== 'candidate') {
+      router.replace(profile.role === 'recruiter' ? '/recruiter' : '/');
+    }
+  }, [loading, profile, router]);
 
   useEffect(() => {
     async function loadData() {
@@ -88,7 +105,7 @@ export default function CandidateDashboard() {
         )}
 
         {!loading && !loadingData && (!profile || profile.role !== 'candidate') && (
-          <div className="text-center text-slate-400 py-24">Sign in as a candidate to access your dashboard.</div>
+          <div className="text-center text-slate-400 py-24">Redirecting to the correct workspace...</div>
         )}
 
         {!loading && !loadingData && profile && profile.role === 'candidate' && (
@@ -182,13 +199,18 @@ export default function CandidateDashboard() {
                                 Current: <span className="text-slate-900 text-sm ml-1">{app.currentStage}</span>
                               </div>
                             </div>
-                            {app.hasReport && (
-                              <Link href={`/transparency-reports/${app.id}`}>
+                            <div className="flex gap-2">
+                              <Link href={`/dashboard/applications/${app.id}`}>
+                                <Button size="sm" variant="outline" className="font-bold h-9">
+                                  View Pipeline
+                                </Button>
+                              </Link>
+                              <Link href={`/transparency-reports/job-${app.jobId}`}>
                                 <Button size="sm" variant="outline" className="text-primary border-primary/20 hover:bg-primary/5 font-bold h-9">
                                   <FileText size={14} className="mr-2" /> View Transparency Report
                                 </Button>
                               </Link>
-                            )}
+                            </div>
                           </div>
                         </div>
                       </Card>
@@ -259,14 +281,18 @@ export default function CandidateDashboard() {
                       <div key={session.id} className="border rounded-lg p-3">
                         <p className="text-xs font-bold text-slate-900">{session.title}</p>
                         <p className="text-[11px] text-slate-500">{new Date(session.startTimeIso).toLocaleString()}</p>
-                        <a
-                          href={session.meetLink}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-[11px] text-primary font-semibold"
-                        >
-                          Join Google Meet
-                        </a>
+                        {session.meetLink ? (
+                          <a
+                            href={session.meetLink}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-[11px] text-primary font-semibold"
+                          >
+                            Join Google Meet
+                          </a>
+                        ) : (
+                          <p className="text-[11px] text-slate-400">Meeting link will be shared soon.</p>
+                        )}
                       </div>
                     ))}
                   </CardContent>

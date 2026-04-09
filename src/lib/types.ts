@@ -55,6 +55,18 @@ export interface Application {
     stageId: string;
     stageName: string;
     status: 'advanced' | 'rejected';
+    actorUid?: string;
+    actorRole?: 'recruiter' | 'candidate' | 'system';
+    decisionReasonCategory?:
+      | 'skills-gap'
+      | 'communication'
+      | 'problem-solving'
+      | 'culture-fit'
+      | 'timeline-mismatch'
+      | 'compensation'
+      | 'other';
+    evidenceBullets?: string[];
+    rubricScore?: number;
     note?: string;
     updatedAt: string;
   }>;

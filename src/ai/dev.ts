@@ -6,3 +6,4 @@ import '@/ai/flows/evaluate-solution-and-provide-feedback.ts';
 import '@/ai/flows/generate-skill-profile-summary.ts';
 import '@/ai/flows/generate-assessment-task-flow.ts';
 import '@/ai/flows/analyze-interview-transcript.ts';
+import '@/ai/flows/analyze-resume-fit-for-job.ts';

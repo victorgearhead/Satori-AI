@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Navigation } from '@/components/Navigation';
 import { useAuth } from '@/components/AuthProvider';
@@ -20,7 +20,7 @@ const DEFAULT_STAGES: PipelineStage[] = [
 ];
 
 export default function NewJobPage() {
-  const { idToken } = useAuth();
+  const { profile, loading, idToken } = useAuth();
   const { toast } = useToast();
   const router = useRouter();
 
@@ -34,6 +34,22 @@ export default function NewJobPage() {
   const [requirementsText, setRequirementsText] = useState('');
   const [tagsText, setTagsText] = useState('');
   const [stages, setStages] = useState<PipelineStage[]>(DEFAULT_STAGES);
+
+  useEffect(() => {
+    if (loading) {
+      return;
+    }
+
+    if (!profile) {
+      router.replace('/');
+      return;
+    }
+
+    if (profile.role !== 'recruiter') {
+      router.replace(profile.role === 'candidate' ? '/dashboard' : '/');
+      return;
+    }
+  }, [loading, profile, router]);
 
   async function handleCreate() {
     if (!idToken) {

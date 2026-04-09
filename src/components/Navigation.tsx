@@ -1,7 +1,7 @@
 "use client"
 
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { Brain, LayoutDashboard, Briefcase, Settings, User, LogOut, FileText } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/components/AuthProvider'
@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 
 export function Navigation() {
   const pathname = usePathname()
+  const router = useRouter()
   const { profile, loading, signInAsCandidate, signInAsRecruiter, signOut } = useAuth()
 
   // Navigation items for the Candidate/User experience
@@ -21,6 +22,21 @@ export function Navigation() {
 
   // Check if we are in the recruiter section to show different nav or styling
   const isRecruiterPath = pathname.startsWith('/recruiter')
+
+  async function handleCandidateLogin() {
+    await signInAsCandidate()
+    router.push('/dashboard')
+  }
+
+  async function handleRecruiterLogin() {
+    await signInAsRecruiter(profile?.companyId ?? 'swiggy')
+    router.push('/recruiter')
+  }
+
+  async function handleSignOut() {
+    await signOut()
+    router.push('/')
+  }
 
   return (
     <nav className="border-b bg-white/50 backdrop-blur-md sticky top-0 z-50">
@@ -74,13 +90,13 @@ export function Navigation() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => signInAsCandidate()}
+                onClick={() => void handleCandidateLogin()}
               >
                 Candidate Login
               </Button>
               <Button
                 size="sm"
-                onClick={() => signInAsRecruiter('swiggy')}
+                onClick={() => void handleRecruiterLogin()}
               >
                 Recruiter Login
               </Button>
@@ -91,7 +107,7 @@ export function Navigation() {
               <div className="w-8 h-8 rounded-full bg-muted border flex items-center justify-center overflow-hidden">
                 <User size={20} className="text-muted-foreground" />
               </div>
-              <Button variant="ghost" size="icon" onClick={() => signOut()}>
+              <Button variant="ghost" size="icon" onClick={() => void handleSignOut()}>
                 <LogOut size={18} />
               </Button>
             </div>

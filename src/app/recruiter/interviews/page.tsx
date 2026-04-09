@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Navigation } from '@/components/Navigation';
 import { useAuth } from '@/components/AuthProvider';
 import { useToast } from '@/hooks/use-toast';
@@ -25,6 +26,7 @@ function toDatetimeLocal(date: Date): string {
 
 export default function RecruiterInterviewsPage() {
   const { profile, idToken, loading } = useAuth();
+  const router = useRouter();
   const { toast } = useToast();
 
   const [applications, setApplications] = useState<Application[]>([]);
@@ -47,6 +49,21 @@ export default function RecruiterInterviewsPage() {
 
   const recruiterCompanyId = profile?.companyId;
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+
+  useEffect(() => {
+    if (loading) {
+      return;
+    }
+
+    if (!profile) {
+      router.replace('/');
+      return;
+    }
+
+    if (profile.role !== 'recruiter') {
+      router.replace(profile.role === 'candidate' ? '/dashboard' : '/');
+    }
+  }, [loading, profile, router]);
 
   async function loadData() {
     if (!profile || profile.role !== 'recruiter' || !recruiterCompanyId) {
@@ -135,7 +152,11 @@ export default function RecruiterInterviewsPage() {
 
       toast({
         title: 'Interview scheduled',
-        description: `Google Meet created: ${result.meetLink}`,
+        description: result.meetLink
+          ? result.calendarFallbackUsed
+            ? `Interview scheduled with fallback link: ${result.meetLink}`
+            : `Google Meet created: ${result.meetLink}`
+          : 'Interview scheduled without auto-generated meet link. Add one from the session card.',
       });
 
       setSelectedApplicationIds([]);
@@ -203,6 +224,45 @@ export default function RecruiterInterviewsPage() {
       await loadData();
     } catch (error) {
       console.error(error);
+    }
+  }
+
+  async function attachMeetLink(sessionId: string) {
+    if (!idToken) return;
+
+    const input = window.prompt('Paste a meeting link (Google Meet/Zoom/etc)');
+    if (!input) {
+      return;
+    }
+
+    const link = input.trim();
+    if (!/^https?:\/\//i.test(link)) {
+      toast({
+        title: 'Invalid link',
+        description: 'Please provide a full URL including https://',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      await updateInterviewSession({
+        idToken,
+        sessionId,
+        meetLink: link,
+      });
+      toast({
+        title: 'Meeting link attached',
+        description: 'Candidates can now join using this link.',
+      });
+      await loadData();
+    } catch (error) {
+      console.error(error);
+      toast({
+        title: 'Failed to attach link',
+        description: error instanceof Error ? error.message : 'Could not update interview link.',
+        variant: 'destructive',
+      });
     }
   }
 
@@ -309,11 +369,16 @@ export default function RecruiterInterviewsPage() {
                     <div className="space-y-1">
                       <div className="font-bold text-slate-900">{session.title}</div>
                       <div className="text-xs text-slate-500">{new Date(session.startTimeIso).toLocaleString()} • {session.jobTitle}</div>
-                      <a href={session.meetLink} target="_blank" rel="noreferrer" className="text-xs text-primary font-semibold">Open Meet Link</a>
+                      {session.meetLink ? (
+                        <a href={session.meetLink} target="_blank" rel="noreferrer" className="text-xs text-primary font-semibold">Open Meet Link</a>
+                      ) : (
+                        <div className="text-xs text-slate-400">No meet link attached yet.</div>
+                      )}
                     </div>
                     <div className="flex items-center gap-2">
                       <Badge>{session.status}</Badge>
                       <Badge className="bg-slate-100 text-slate-700 border border-slate-200">Transcript: {session.transcriptStatus}</Badge>
+                      <Button variant="outline" onClick={() => attachMeetLink(session.id)}>Attach Link</Button>
                       {session.status !== 'Completed' && (
                         <Button variant="outline" onClick={() => markCompleted(session.id)}>Mark Completed</Button>
                       )}
