@@ -23,6 +23,14 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  webpack: (config) => {
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      '@genkit-ai/firebase': false,
+    };
+
+    return config;
+  },
 };
 
 export default nextConfig;
