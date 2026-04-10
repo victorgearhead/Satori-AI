@@ -18,7 +18,16 @@ import {
   serverTimestamp,
   setDoc,
 } from 'firebase/firestore';
-import { auth, db, signInWithGoogle, signOutUser } from '@/lib/firebase';
+import {
+  auth,
+  db,
+  requestPasswordReset,
+  registerWithEmailPassword,
+  sendVerificationEmail,
+  signInWithEmailPassword,
+  signInWithGoogle,
+  signOutUser,
+} from '@/lib/firebase';
 import type { UserProfile, UserRole } from '@/lib/types';
 
 interface AuthContextValue {
@@ -28,7 +37,25 @@ interface AuthContextValue {
   idToken: string | null;
   signInAsCandidate: () => Promise<void>;
   signInAsRecruiter: (companyId: string) => Promise<void>;
+  registerCandidateWithEmail: (email: string, password: string) => Promise<void>;
+  registerRecruiterWithEmail: (email: string, password: string, companyId: string) => Promise<void>;
+  signInCandidateWithEmail: (email: string, password: string) => Promise<void>;
+  signInRecruiterWithEmail: (email: string, password: string, companyId: string) => Promise<void>;
+  resendEmailVerification: () => Promise<void>;
+  forgotPassword: (email: string) => Promise<void>;
   signOut: () => Promise<void>;
+}
+
+async function ensureVerifiedEmail(user: FirebaseUser) {
+  await user.reload();
+
+  if (user.emailVerified) {
+    return;
+  }
+
+  await sendVerificationEmail();
+  await signOutUser();
+  throw new Error('Please verify your email before logging in. We have sent a verification email.');
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -166,6 +193,62 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         );
         setProfile(createdProfile);
         setIdToken(await credential.user.getIdToken());
+      },
+      registerCandidateWithEmail: async (email: string, password: string) => {
+        const credential = await registerWithEmailPassword(email, password);
+        const createdProfile = await getOrCreateUserProfile(credential.user, 'candidate', undefined, {
+          forceRoleUpdate: true,
+        });
+        setProfile(createdProfile);
+        setIdToken(await credential.user.getIdToken());
+        await signOutUser();
+        setProfile(null);
+        setIdToken(null);
+      },
+      registerRecruiterWithEmail: async (email: string, password: string, companyId: string) => {
+        const credential = await registerWithEmailPassword(email, password);
+        const createdProfile = await getOrCreateUserProfile(
+          credential.user,
+          'recruiter',
+          companyId,
+          {
+            forceRoleUpdate: true,
+          }
+        );
+        setProfile(createdProfile);
+        setIdToken(await credential.user.getIdToken());
+        await signOutUser();
+        setProfile(null);
+        setIdToken(null);
+      },
+      signInCandidateWithEmail: async (email: string, password: string) => {
+        const credential = await signInWithEmailPassword(email, password);
+        await ensureVerifiedEmail(credential.user);
+        const createdProfile = await getOrCreateUserProfile(credential.user, 'candidate', undefined, {
+          forceRoleUpdate: true,
+        });
+        setProfile(createdProfile);
+        setIdToken(await credential.user.getIdToken());
+      },
+      signInRecruiterWithEmail: async (email: string, password: string, companyId: string) => {
+        const credential = await signInWithEmailPassword(email, password);
+        await ensureVerifiedEmail(credential.user);
+        const createdProfile = await getOrCreateUserProfile(
+          credential.user,
+          'recruiter',
+          companyId,
+          {
+            forceRoleUpdate: true,
+          }
+        );
+        setProfile(createdProfile);
+        setIdToken(await credential.user.getIdToken());
+      },
+      resendEmailVerification: async () => {
+        await sendVerificationEmail();
+      },
+      forgotPassword: async (email: string) => {
+        await requestPasswordReset(email);
       },
       signOut: async () => {
         await signOutUser();

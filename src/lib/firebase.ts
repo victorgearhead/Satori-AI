@@ -1,7 +1,11 @@
 import { initializeApp, getApps, getApp, type FirebaseApp } from 'firebase/app';
 import {
+  createUserWithEmailAndPassword,
   getAuth,
   GoogleAuthProvider,
+  sendPasswordResetEmail,
+  sendEmailVerification,
+  signInWithEmailAndPassword,
   signInWithPopup,
   signOut,
   type UserCredential,
@@ -37,6 +41,34 @@ const googleProvider = new GoogleAuthProvider();
 
 export async function signInWithGoogle(): Promise<UserCredential> {
   return signInWithPopup(auth, googleProvider);
+}
+
+export async function registerWithEmailPassword(
+  email: string,
+  password: string
+): Promise<UserCredential> {
+  const credential = await createUserWithEmailAndPassword(auth, email, password);
+  await sendEmailVerification(credential.user);
+  return credential;
+}
+
+export async function signInWithEmailPassword(
+  email: string,
+  password: string
+): Promise<UserCredential> {
+  return signInWithEmailAndPassword(auth, email, password);
+}
+
+export async function sendVerificationEmail(): Promise<void> {
+  if (!auth.currentUser) {
+    throw new Error('No authenticated user found to verify.');
+  }
+
+  await sendEmailVerification(auth.currentUser);
+}
+
+export async function requestPasswordReset(email: string): Promise<void> {
+  await sendPasswordResetEmail(auth, email);
 }
 
 export async function signOutUser(): Promise<void> {

@@ -2,21 +2,26 @@
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { useState } from 'react'
 import { Brain, Fingerprint, UserCheck, Search, Globe, Scale } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { AuthDialog } from '@/components/AuthDialog'
 import { useAuth } from '@/components/AuthProvider'
 
 export default function LandingPage() {
   const router = useRouter()
-  const { profile, signInAsCandidate, signInAsRecruiter } = useAuth()
+  const { profile } = useAuth()
+  const [isAuthDialogOpen, setIsAuthDialogOpen] = useState(false)
+  const [dialogMode, setDialogMode] = useState<'candidate' | 'recruiter'>('candidate')
 
   async function openCandidateConsole() {
     if (profile?.role === 'candidate') {
       router.push('/dashboard')
       return
     }
-    await signInAsCandidate()
-    router.push('/dashboard')
+
+    setDialogMode('candidate')
+    setIsAuthDialogOpen(true)
   }
 
   async function openRecruiterPortal() {
@@ -24,8 +29,9 @@ export default function LandingPage() {
       router.push('/recruiter')
       return
     }
-    await signInAsRecruiter(profile?.companyId ?? 'swiggy')
-    router.push('/recruiter')
+
+    setDialogMode('recruiter')
+    setIsAuthDialogOpen(true)
   }
 
   return (
@@ -116,6 +122,11 @@ export default function LandingPage() {
         </div>
         <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">&copy; 2024 Satori Intelligence Platform. Redefining Global Tech Hiring.</p>
       </footer>
+      <AuthDialog
+        open={isAuthDialogOpen}
+        onOpenChange={setIsAuthDialogOpen}
+        initialMode={dialogMode}
+      />
     </div>
   )
 }

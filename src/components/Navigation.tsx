@@ -2,15 +2,19 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
+import { useState } from 'react'
 import { Brain, LayoutDashboard, Briefcase, Settings, User, LogOut, FileText } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/components/AuthProvider'
+import { AuthDialog } from '@/components/AuthDialog'
 import { Button } from '@/components/ui/button'
 
 export function Navigation() {
   const pathname = usePathname()
   const router = useRouter()
-  const { profile, loading, signInAsCandidate, signInAsRecruiter, signOut } = useAuth()
+  const { profile, loading, signOut } = useAuth()
+  const [isAuthDialogOpen, setIsAuthDialogOpen] = useState(false)
+  const [dialogMode, setDialogMode] = useState<'candidate' | 'recruiter'>('candidate')
 
   // Navigation items for the Candidate/User experience
   const navItems = [
@@ -23,14 +27,14 @@ export function Navigation() {
   // Check if we are in the recruiter section to show different nav or styling
   const isRecruiterPath = pathname.startsWith('/recruiter')
 
-  async function handleCandidateLogin() {
-    await signInAsCandidate()
-    router.push('/dashboard')
+  function handleCandidateLogin() {
+    setDialogMode('candidate')
+    setIsAuthDialogOpen(true)
   }
 
-  async function handleRecruiterLogin() {
-    await signInAsRecruiter(profile?.companyId ?? 'swiggy')
-    router.push('/recruiter')
+  function handleRecruiterLogin() {
+    setDialogMode('recruiter')
+    setIsAuthDialogOpen(true)
   }
 
   async function handleSignOut() {
@@ -90,13 +94,13 @@ export function Navigation() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => void handleCandidateLogin()}
+                onClick={handleCandidateLogin}
               >
                 Candidate Login
               </Button>
               <Button
                 size="sm"
-                onClick={() => void handleRecruiterLogin()}
+                onClick={handleRecruiterLogin}
               >
                 Recruiter Login
               </Button>
@@ -114,6 +118,11 @@ export function Navigation() {
           )}
         </div>
       </div>
+      <AuthDialog
+        open={isAuthDialogOpen}
+        onOpenChange={setIsAuthDialogOpen}
+        initialMode={dialogMode}
+      />
     </nav>
   )
 }
