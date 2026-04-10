@@ -46,6 +46,13 @@ interface AuthContextValue {
   signOut: () => Promise<void>;
 }
 
+type PendingAuthIntent = {
+  role: UserRole;
+  companyId?: string;
+};
+
+let pendingAuthIntent: PendingAuthIntent | null = null;
+
 async function ensureVerifiedEmail(user: FirebaseUser) {
   await user.reload();
 
@@ -156,9 +163,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           uid: user.uid,
           ...data,
         });
+        pendingAuthIntent = null;
       } else {
-        const created = await getOrCreateUserProfile(user, 'candidate');
+        const intendedRole = pendingAuthIntent?.role ?? 'candidate';
+        const intendedCompanyId = intendedRole === 'recruiter' ? pendingAuthIntent?.companyId : undefined;
+        const created = await getOrCreateUserProfile(user, intendedRole, intendedCompanyId);
         setProfile(created);
+        pendingAuthIntent = null;
       }
 
       setLoading(false);
@@ -167,6 +178,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => unsubscribe();
   }, []);
 
+  async function withPendingIntent<T>(intent: PendingAuthIntent, action: () => Promise<T>): Promise<T> {
+    pendingAuthIntent = intent;
+    try {
+      return await action();
+    } catch (error) {
+      pendingAuthIntent = null;
+      throw error;
+    }
+  }
+
   const value = useMemo<AuthContextValue>(
     () => ({
       firebaseUser,
@@ -174,7 +195,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loading,
       idToken,
       signInAsCandidate: async () => {
-        const credential = await signInWithGoogle();
+        const credential = await withPendingIntent({ role: 'candidate' }, () => signInWithGoogle());
         const createdProfile = await getOrCreateUserProfile(credential.user, 'candidate', undefined, {
           forceRoleUpdate: true,
         });
@@ -182,7 +203,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIdToken(await credential.user.getIdToken());
       },
       signInAsRecruiter: async (companyId: string) => {
-        const credential = await signInWithGoogle();
+        const credential = await withPendingIntent(
+          {
+            role: 'recruiter',
+            companyId,
+          },
+          () => signInWithGoogle()
+        );
         const createdProfile = await getOrCreateUserProfile(
           credential.user,
           'recruiter',
@@ -195,7 +222,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIdToken(await credential.user.getIdToken());
       },
       registerCandidateWithEmail: async (email: string, password: string) => {
-        const credential = await registerWithEmailPassword(email, password);
+        const credential = await withPendingIntent(
+          { role: 'candidate' },
+          () => registerWithEmailPassword(email, password)
+        );
         const createdProfile = await getOrCreateUserProfile(credential.user, 'candidate', undefined, {
           forceRoleUpdate: true,
         });
@@ -204,9 +234,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await signOutUser();
         setProfile(null);
         setIdToken(null);
+        pendingAuthIntent = null;
       },
       registerRecruiterWithEmail: async (email: string, password: string, companyId: string) => {
-        const credential = await registerWithEmailPassword(email, password);
+        const credential = await withPendingIntent(
+          {
+            role: 'recruiter',
+            companyId,
+          },
+          () => registerWithEmailPassword(email, password)
+        );
         const createdProfile = await getOrCreateUserProfile(
           credential.user,
           'recruiter',
@@ -220,9 +257,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await signOutUser();
         setProfile(null);
         setIdToken(null);
+        pendingAuthIntent = null;
       },
       signInCandidateWithEmail: async (email: string, password: string) => {
-        const credential = await signInWithEmailPassword(email, password);
+        const credential = await withPendingIntent(
+          { role: 'candidate' },
+          () => signInWithEmailPassword(email, password)
+        );
         await ensureVerifiedEmail(credential.user);
         const createdProfile = await getOrCreateUserProfile(credential.user, 'candidate', undefined, {
           forceRoleUpdate: true,
@@ -231,7 +272,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIdToken(await credential.user.getIdToken());
       },
       signInRecruiterWithEmail: async (email: string, password: string, companyId: string) => {
-        const credential = await signInWithEmailPassword(email, password);
+        const credential = await withPendingIntent(
+          {
+            role: 'recruiter',
+            companyId,
+          },
+          () => signInWithEmailPassword(email, password)
+        );
         await ensureVerifiedEmail(credential.user);
         const createdProfile = await getOrCreateUserProfile(
           credential.user,
@@ -254,6 +301,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await signOutUser();
         setProfile(null);
         setIdToken(null);
+        pendingAuthIntent = null;
       },
     }),
     [firebaseUser, profile, loading, idToken]
