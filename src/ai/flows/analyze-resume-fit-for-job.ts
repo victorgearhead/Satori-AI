@@ -3,6 +3,82 @@
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
 
+const GENERIC_SKILL_TERMS = new Set([
+  'ability',
+  'across',
+  'candidate',
+  'communication',
+  'detail',
+  'documentation',
+  'ensure',
+  'experience',
+  'familiarity',
+  'knowledge',
+  'problem solving',
+  'problem-solving',
+  'quality',
+  'required',
+  'responsibility',
+  'role',
+  'skills',
+  'strong',
+  'team',
+  'understanding',
+  'work',
+  'years',
+]);
+
+function normalizeSkillToken(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9.+#\-\s/]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isLikelySkill(text: string): boolean {
+  const normalized = normalizeSkillToken(text);
+  if (!normalized) {
+    return false;
+  }
+
+  if (normalized.length < 2 || normalized.length > 40) {
+    return false;
+  }
+
+  const words = normalized.split(' ').filter(Boolean);
+  if (words.length === 0 || words.length > 4) {
+    return false;
+  }
+
+  if (GENERIC_SKILL_TERMS.has(normalized)) {
+    return false;
+  }
+
+  const meaningfulWordCount = words.filter(
+    (word) => !GENERIC_SKILL_TERMS.has(word) && word.length > 1
+  ).length;
+
+  return meaningfulWordCount > 0;
+}
+
+function sanitizeSkillList(values: string[], maxItems = 12): string[] {
+  const unique = new Set<string>();
+
+  for (const raw of values) {
+    const normalized = normalizeSkillToken(raw);
+    if (!isLikelySkill(normalized)) {
+      continue;
+    }
+    unique.add(normalized);
+    if (unique.size >= maxItems) {
+      break;
+    }
+  }
+
+  return Array.from(unique);
+}
+
 const AnalyzeResumeFitForJobInputSchema = z.object({
   jobTitle: z.string().min(2),
   jobDescription: z.string().min(10),
@@ -62,6 +138,10 @@ Instructions:
 4) Return 3-6 strengths and 2-6 concerns.
 5) Keep summary concise (2-4 sentences) and recruiter-friendly.
 6) Do not include PII.
+7) For matchedSkills and missingSkills, include ONLY real skill terms (tools, frameworks, languages, platforms, methods), not sentence fragments.
+8) Never output generic soft-skill or requirement words as skills (for example: communication, teamwork, problem solving, quality, responsibility, knowledge, experience).
+9) Keep each skill short (1-4 words), lowercase preferred, and deduplicated.
+10) Cap matchedSkills and missingSkills to 12 items each.
 
 Return JSON only, matching the output schema.`,
 });
@@ -74,6 +154,11 @@ const analyzeResumeFitForJobFlow = ai.defineFlow(
   },
   async (input) => {
     const { output } = await prompt(input);
-    return output!;
+    const safeOutput = output!;
+    return {
+      ...safeOutput,
+      matchedSkills: sanitizeSkillList(safeOutput.matchedSkills, 12),
+      missingSkills: sanitizeSkillList(safeOutput.missingSkills, 12),
+    };
   }
 );
