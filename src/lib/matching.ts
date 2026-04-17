@@ -331,34 +331,19 @@ function buildJobSkillPool(job: Job): string[] {
     .map((stage) => stage.instructions ?? '')
     .filter(Boolean);
 
-  const focusedChunks = [
-    job.title,
-    ...(job.tags ?? []),
-    ...(job.requirements ?? []),
-    ...stageInstructionChunks,
-  ];
-
+  // Keep job matching skill-focused: avoid prose n-grams from titles/requirements.
+  // This prevents noisy missing-skill output such as role titles and sentence fragments.
   const knownSkills = extractKnownSkills(
-    [job.title, job.description, ...(job.tags ?? []), ...(job.requirements ?? [])].join(' ')
+    [
+      job.title,
+      job.description,
+      ...(job.tags ?? []),
+      ...(job.requirements ?? []),
+      ...stageInstructionChunks,
+    ].join(' ')
   );
-  const parsedPhrases = parseSkillPhrases(focusedChunks, 60);
 
-  const dynamicFallback = extractDynamicTerms(
-    [...(job.tags ?? []), ...(job.requirements ?? [])].join(' '),
-    40
-  )
-    .map((term) => canonicalizePhrase(term))
-    .filter((term) => {
-      const words = term.split(' ').filter(Boolean);
-      if (words.length === 0 || words.length > 3) {
-        return false;
-      }
-      return words.some(
-        (word) => !STOP_WORDS.has(word) && !GENERIC_REQUIREMENT_WORDS.has(word)
-      );
-    });
-
-  return Array.from(new Set([...knownSkills, ...parsedPhrases, ...dynamicFallback])).slice(0, 40);
+  return Array.from(new Set(knownSkills)).slice(0, 30);
 }
 
 export function scoreJobMatch(

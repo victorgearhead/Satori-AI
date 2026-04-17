@@ -276,6 +276,72 @@ async function extractPdfTextFromUrl(cvUrl: string): Promise<string> {
   return text;
 }
 
+function normalizeSkillName(skill: string): string {
+  return skill
+    .toLowerCase()
+    .replace(/[^a-z0-9.+#\-\s/]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function dedupeSkills(skills: string[], limit = 20): string[] {
+  const seen = new Set<string>();
+  const output: string[] = [];
+
+  for (const skill of skills) {
+    const normalized = normalizeSkillName(skill);
+    if (!normalized || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    output.push(normalized);
+    if (output.length >= limit) {
+      break;
+    }
+  }
+
+  return output;
+}
+
+async function scoreJobMatchSmart(args: {
+  resumeText: string;
+  resumeSkills: string[];
+  job: Job;
+}): Promise<{ score: number; missingSkills: string[]; matchedSkills: string[] }> {
+  const fallback = scoreJobMatch(args.resumeSkills, args.job);
+
+  try {
+    const ai = await analyzeResumeFitForJob({
+      jobTitle: args.job.title,
+      jobDescription: args.job.description,
+      requirements: Array.isArray(args.job.requirements) ? args.job.requirements : [],
+      tags: Array.isArray(args.job.tags) ? args.job.tags : [],
+      // Bound prompt size for latency and token cost, while retaining signal.
+      resumeText: args.resumeText.slice(0, 12000),
+    });
+
+    const blendedScore = Math.round(ai.overallMatchScore * 0.75 + fallback.score * 0.25);
+
+    const matchedSkills = dedupeSkills([...ai.matchedSkills, ...fallback.matchedSkills], 20);
+    const matchedSet = new Set(matchedSkills.map((skill) => normalizeSkillName(skill)));
+    const missingSkills = dedupeSkills(
+      [...ai.missingSkills, ...fallback.missingSkills].filter(
+        (skill) => !matchedSet.has(normalizeSkillName(skill))
+      ),
+      20
+    );
+
+    return {
+      score: Math.max(0, Math.min(100, blendedScore)),
+      missingSkills,
+      matchedSkills,
+    };
+  } catch (error) {
+    console.error(`AI match scoring failed for job ${args.job.id}, using fallback`, error);
+    return fallback;
+  }
+}
+
 function getStageStatus(stageType: PipelineStage['type']):
   | 'Pending'
   | 'Screening'
@@ -1057,7 +1123,11 @@ export async function analyzeResumeAndAutoApply(
   let autoAppliedCount = 0;
 
   for (const job of jobs) {
-    const match = scoreJobMatch(skills, job);
+    const match = await scoreJobMatchSmart({
+      resumeText: extractedText,
+      resumeSkills: skills,
+      job,
+    });
     const shouldApply = match.score >= threshold;
 
     let autoApplied = false;
